@@ -1,0 +1,19 @@
+{
+  "name": "Sinbod Wayne Productions",
+  "short_name": "SW Productions",
+  "description": "The Sinbod Wayne pre-production studio.",
+  "start_url": "/projects",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#080d10",
+  "theme_color": "#080d10",
+  "lang": "en-GB",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

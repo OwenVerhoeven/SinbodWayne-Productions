@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Sinbod Wayne Productions</title>
+  <rect width="512" height="512" rx="52" fill="#080d10"/>
+  <path d="M96 116h320v22H96zm0 258h320v22H96z" fill="#e5ad42"/>
+  <path d="M107 183h72c49 0 78 22 78 62 0 27-15 46-42 55l55 80h-57l-47-72h-13v72h-46zm46 39v49h22c22 0 34-8 34-25 0-16-12-24-34-24zm126-39h48l26 121 29-121h48l-51 197h-49z" fill="#edf1ef"/>
+</svg>

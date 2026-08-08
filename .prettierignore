@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.wrangler
+playwright-report
+test-results
+package-lock.json
+apps/web/worker-configuration.d.ts
+

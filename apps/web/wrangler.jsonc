@@ -1,0 +1,97 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sinbod-wayne-productions",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sinbod-wayne-productions-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+      "migrations_table": "d1_migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "sinbod-wayne-productions-files",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PROJECT_COLLABORATION",
+        "class_name": "ProjectCollaborationHub",
+      },
+    ],
+  },
+  "workflows": [
+    {
+      "binding": "ARCHIVE_WORKFLOW",
+      "name": "sinbod-wayne-productions-archive",
+      "class_name": "ArchiveWorkflow",
+    },
+  ],
+  "ratelimits": [
+    {
+      "name": "LOGIN_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 5,
+        "period": 60,
+      },
+    },
+    {
+      "name": "PUBLIC_RATE_LIMITER",
+      "namespace_id": "1002",
+      "simple": {
+        "limit": 30,
+        "period": 60,
+      },
+    },
+  ],
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ProjectCollaborationHub"],
+    },
+  ],
+  "vars": {
+    "APP_ORIGIN": "https://productions.sinbodwayne.nl",
+    "APP_TIMEZONE": "Europe/Amsterdam",
+    "APP_LOCALE": "en-GB",
+    "SESSION_IDLE_SECONDS": "1800",
+    "SESSION_ABSOLUTE_SECONDS": "28800",
+    "UPLOAD_MAX_BYTES": "2147483648",
+    "MULTIPART_THRESHOLD_BYTES": "33554432",
+    "MULTIPART_PART_BYTES": "16777216",
+  },
+  "routes": [
+    {
+      "pattern": "productions.sinbodwayne.nl",
+      "custom_domain": true,
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05,
+      "persist": true,
+    },
+  },
+}
