@@ -9,7 +9,7 @@ The cloud application is the active workspace; a private NAS is the durable arch
 
 ## Decision
 
-An authorized producer creates an immutable export snapshot and durable archive job. Workflows prepare versioned project JSON, human/issued artifacts, selected exact file versions and an immutable manifest in private R2.
+An authorized producer creates an immutable export snapshot and durable archive job. Workflows prepare versioned project JSON, human/issued artifacts, selected exact file versions and an immutable manifest in the configured private object store. The current backend is Workers KV; object reads remain mediated by the Worker service protocol.
 
 An outbound-only Node agent on a maintained host with the NAS mounted:
 
@@ -33,10 +33,11 @@ The application states are Requested, Running, Verifying, Verified and Failed, b
 - Failed/partial staging needs a bounded cleanup and operator-recovery policy.
 - The service protocol must support credential rotation and duplicate/reordered requests.
 - Owner-only cloud retention requires exact verified-version evidence, legal/retention checks and typed confirmation.
+- The agent and protocol are release code, but production NAS host, mount, destination, and service credential are a later optional operational rollout and are never implied by cloud deployment.
 
 ## Alternatives considered
 
 - Browser uploads directly to the NAS: rejected because it requires network reachability and weakens verification/control.
 - Inbound NAS webhook/server: rejected because the NAS must not be internet facing.
-- Sync/mount R2 as a live directory: rejected because it blurs active workspace, archive identity and verification.
+- Sync/mount cloud object storage as a live directory: rejected because it blurs active workspace, archive identity and verification.
 - Delete cloud data on archive completion: rejected because archive and retention are separate risk decisions and no automation may remove the only known good copy.

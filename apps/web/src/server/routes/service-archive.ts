@@ -12,6 +12,7 @@ import {
   manifestAcknowledgementSchema,
   type ArchiveServicePrincipal,
 } from "../archive/types";
+import type { ApplicationBindings } from "../http/types";
 
 const MAX_JSON_BODY_BYTES = 16_384;
 const routeIdentifier = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
@@ -23,13 +24,13 @@ type ArchiveRouteVariables = {
 };
 
 type ArchiveRouteEnvironment = {
-  Bindings: CloudflareBindings;
+  Bindings: ApplicationBindings;
   Variables: ArchiveRouteVariables;
 };
 
 export interface ArchiveServiceRouteOptions {
   readonly coordinatorFactory?: (
-    bindings: Pick<CloudflareBindings, "DB" | "FILES">,
+    bindings: Pick<ApplicationBindings, "DB" | "FILES">,
   ) => ArchiveCoordinatorContract;
   readonly now?: () => number;
   readonly requestId?: () => string;

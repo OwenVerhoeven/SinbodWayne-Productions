@@ -11,7 +11,7 @@
 - Ranks use collision-resistant fractional ordering and have a deterministic rebalance operation.
 - Revisions, issues, decisions, audit events, file versions, snapshots and archive acknowledgements are append-only.
 - JSON is bounded and schema-versioned for immutable snapshots, provider evidence, editor fragments or intentionally variable presentation configuration. The live project is never one JSON document.
-- Binary content resides in private R2; D1 contains relational metadata, pins and integrity values.
+- Binary content resides in the configured private object store; the current backend is Workers KV. D1 contains relational metadata, quotas, pins, retention state, and integrity values.
 
 ## Common relational foundation
 
@@ -181,13 +181,24 @@ Private recipient content is never placed in a common issue body and filtered cl
 
 An evaluator result is one of pass, warning, blocker or unavailable. Unavailable/missing never normalizes to pass. Issue rows freeze the full rule/profile version, source pins, approvals and overrides.
 
+### Files and private storage
+
+- `folders`, `files`, `file_versions`, `file_links` model mutable logical organization and immutable byte versions.
+- `file_versions.object_key` is a unique opaque adapter key; D1 also stores byte size, MIME type, SHA-256, uploader, provenance, scan state, retention class, and version pins.
+- `upload_sessions` authorize one bounded upload. The current Workers KV profile permits at most 25 MiB and does not create multipart state.
+- Workspace storage projections enforce the 1 GB (`1000000000` bytes) planned object budget and expose the 1,000-writes/day operational ceiling before accepting an upload.
+- A temporary recent-write miss is a retriable propagation result. It does not change immutable metadata, current pointers, or retention state.
+- Physical backend names do not appear in new domain contracts. Existing historical `r2_object_key` columns are legacy neutral-key fields until a dedicated forward migration renames them.
+
 ### Exports and archive
 
-- `export_snapshots`, `export_snapshot_objects`, `export_manifest_items` — schema version, R2 body/manifest, source pins and overall integrity.
+- `export_snapshots`, `export_snapshot_objects`, `export_manifest_items` — schema version, private-object body/manifest references, source pins and overall integrity.
 - `archive_jobs`, `archive_attempts`, `archive_manifest_items`, `archive_leases`, `archive_acknowledgements`.
 - `retention_actions` — owner-only distinct cloud-copy removal request with verified archive and legal/retention evidence.
 
 Archive manifest paths are safe relative logical destinations; cloud object keys and access credentials never become NAS destination paths.
+
+The NAS schema and protocol remain active attachment points, but production NAS service credentials and destination configuration are a later optional operational rollout. A future R2 backend migration changes storage bindings and object mappings, not these relational identities.
 
 ## Key relationships and deletion behavior
 

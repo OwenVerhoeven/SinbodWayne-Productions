@@ -99,7 +99,7 @@ export function ProductionPacksPage() {
           <strong>Server ZIP assembly: Not configured</strong>
           <p>
             Immutable ordered manifests and deterministic print/Save-as-PDF are available. The UI
-            does not claim a ZIP exists until R2 generation evidence is present.
+            does not claim a ZIP exists until private-storage generation evidence is present.
           </p>
         </div>
       </aside>

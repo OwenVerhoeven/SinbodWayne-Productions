@@ -2,6 +2,12 @@
 
 This package is the outbound-only half of the archive workflow. It polls the authenticated service API, leases one immutable export job, downloads its private objects into a job-specific staging directory, verifies every byte count and SHA-256 digest, and only then installs files into the configured archive root and acknowledges the manifest. It does not listen on a port and its API surface has no cloud-delete operation.
 
+## Deployment status and cloud storage profile
+
+The agent and protocol are implemented and locally tested. No production NAS host, mount, destination, service credential, transfer, or verification is claimed; provisioning them is a later optional operational rollout and does not block the initial cloud deployment.
+
+The current cloud backend is private Workers KV behind a storage-neutral immutable adapter, with 25 MiB per file, a 1 GB (`1000000000` bytes) planned total, 1,000 writes per day, and no multipart upload. A recent-write miss can be an explicit retriable propagation state. Range responses used for resume are Worker adapter projections over one bounded value, not native KV multipart/range storage. R2 is a future optional capacity backend and does not change the NAS manifest or checksum protocol.
+
 ## Safety contract
 
 - The destination root is an explicit, existing absolute directory and may not be a filesystem root, symlink, or junction.
@@ -14,7 +20,7 @@ This package is the outbound-only half of the archive workflow. It polls the aut
 - Installation prefers an atomic, exclusive hard-link into the final name. Filesystems without hard links use a same-filesystem atomic rename while the server lease prevents concurrent agents; a cross-filesystem staging/final layout fails closed.
 - File and parent-directory `fsync` are attempted; unsupported directory syncing is reported without claiming stronger durability.
 - Item and manifest acknowledgements use deterministic idempotency keys, so a crash after installation or acknowledgement is safe to resume.
-- Archive verification never removes an R2 object. Cloud retention is a separate owner-only application action.
+- Archive verification never removes a cloud object. Cloud retention is a separate owner-only application action.
 
 ## Configuration
 

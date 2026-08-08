@@ -1007,7 +1007,8 @@ async function loadArtifact(
         `SELECT fv.id, f.title, f.summary, fv.safe_display_name, fv.object_key, fv.mime_type,
               fv.byte_size, fv.created_at, fv.scan_state
          FROM file_versions fv JOIN files f ON f.id = fv.file_id AND f.workspace_id = fv.workspace_id AND f.project_id = fv.project_id
-        WHERE fv.id = ?1 AND fv.workspace_id = ?2 AND fv.project_id = ?3 LIMIT 1`,
+        WHERE fv.id = ?1 AND fv.workspace_id = ?2 AND fv.project_id = ?3
+          AND f.status <> 'cloud_removed' LIMIT 1`,
       )
       .bind(objectId, workspaceId, projectId)
       .first<{

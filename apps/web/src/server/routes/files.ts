@@ -5,11 +5,7 @@ import { z } from "zod";
 import { auditStatement } from "../audit";
 import { assertAllowed, assertProjectAccess } from "../auth/policy";
 import { requireActor, requireCsrf } from "../auth/session";
-import { consumeStreamWithSha256, sha256HexFromStream } from "../files/hashing";
 import {
-  MULTIPART_MAX_PART_BYTES,
-  MULTIPART_MAX_PARTS,
-  MULTIPART_MIN_PART_BYTES,
   arrayBufferToHex,
   assertFileSignature,
   assertStoredObject,
@@ -32,6 +28,10 @@ import { HttpError } from "../http/errors";
 import { requireJson, requireSameOrigin } from "../http/security";
 import type { ActorContext, AppEnv } from "../http/types";
 import { parseIfMatch, versionGuard } from "../records/version";
+import {
+  PRIVATE_OBJECT_MAX_BYTES,
+  PRIVATE_OBJECT_TOTAL_BUDGET_BYTES,
+} from "../storage/private-object-store";
 
 const authorizeSchema = z
   .object({
@@ -48,7 +48,6 @@ const authorizeSchema = z
   })
   .strict();
 
-const multipartCompleteSchema = z.object({}).strict();
 const retentionSchema = z.object({ confirmation: z.string().max(500) }).strict();
 const fileLinkSchema = z
   .object({
@@ -119,13 +118,6 @@ interface FileVersionRow {
   readonly created_at: number;
 }
 
-interface UploadPartRow {
-  readonly part_number: number;
-  readonly etag: string;
-  readonly byte_size: number;
-  readonly sha256: string | null;
-}
-
 export const fileRoutes = new Hono<AppEnv>();
 fileRoutes.use("*", requireActor, requireSameOrigin, requireCsrf);
 
@@ -163,23 +155,27 @@ fileRoutes.post("/uploads/authorize", requireJson, async (context) => {
   const projectId = requiredParam(context.req.param("projectId"), "projectId");
   await assertProjectAccess(context.env.DB, actor, projectId, "edit");
   const input = authorizeSchema.parse(await context.req.json());
-  const threshold = positiveInteger(context.env.MULTIPART_THRESHOLD_BYTES, 32 * 1024 * 1024);
-  const mode =
-    input.mode === "auto" ? (input.byteSize >= threshold ? "multipart" : "single") : input.mode;
-  if (mode === "single" && input.byteSize >= threshold) {
+  if (input.mode === "multipart") {
     throw new HttpError(
-      413,
-      "multipart_required",
-      "This file must use the resumable multipart upload path.",
+      422,
+      "multipart_not_available",
+      "The no-subscription storage profile supports single uploads up to 25 MiB.",
     );
   }
+  const mode = "single" as const;
   const intent = {
     byteSize: input.byteSize,
     mimeType: normaliseMimeType(input.mimeType),
     sha256: input.sha256,
     mode,
   } satisfies UploadIntent;
-  assertUploadIntent(intent, positiveInteger(context.env.UPLOAD_MAX_BYTES, 2 * 1024 * 1024 * 1024));
+  assertUploadIntent(
+    intent,
+    Math.min(
+      positiveInteger(context.env.UPLOAD_MAX_BYTES, PRIVATE_OBJECT_MAX_BYTES),
+      PRIVATE_OBJECT_MAX_BYTES,
+    ),
+  );
   if (input.fileId) await requireFile(context.env.DB, actor, projectId, input.fileId, false);
   if (input.folderId) await requireFolder(context.env.DB, actor, projectId, input.folderId);
 
@@ -196,7 +192,6 @@ fileRoutes.post("/uploads/authorize", requireJson, async (context) => {
       context,
       uploadAuthorizationView(
         await requireUploadSession(context.env.DB, actor, projectId, lease.replayRef),
-        positiveInteger(context.env.MULTIPART_PART_BYTES, 16 * 1024 * 1024),
       ),
     );
   }
@@ -205,14 +200,16 @@ fileRoutes.post("/uploads/authorize", requireJson, async (context) => {
   const objectKey = `private/${opaqueKeyPart(actor.workspaceId)}/${opaqueKeyPart(projectId)}/uploads/${opaqueKeyPart(id)}`;
   const now = Date.now();
   const expiresAt = now + 60 * 60 * 1000;
-  let multipart: R2MultipartUpload | undefined;
   try {
-    if (mode === "multipart") {
-      multipart = await context.env.FILES.createMultipartUpload(objectKey, {
-        httpMetadata: { contentType: intent.mimeType, cacheControl: "private, no-store" },
-        customMetadata: uploadMetadata(id, actor.workspaceId, projectId, intent.sha256),
-      });
-    }
+    await assertStorageBudget(
+      context.env.DB,
+      actor.workspaceId,
+      intent.byteSize,
+      positiveInteger(
+        context.env.FILE_STORAGE_TOTAL_BUDGET_BYTES,
+        PRIVATE_OBJECT_TOTAL_BUDGET_BYTES,
+      ),
+    );
     await context.env.DB.batch([
       context.env.DB.prepare(
         `INSERT INTO upload_sessions
@@ -238,7 +235,7 @@ fileRoutes.post("/uploads/authorize", requireJson, async (context) => {
           retentionClass: input.retentionClass ?? null,
         }),
         mode,
-        multipart?.uploadId ?? null,
+        null,
         actor.userId,
         expiresAt,
         now,
@@ -262,16 +259,12 @@ fileRoutes.post("/uploads/authorize", requireJson, async (context) => {
       }),
     ]);
   } catch (error) {
-    if (multipart) await multipart.abort().catch(() => undefined);
     await failIdempotentOperation(context.env.DB, lease.id);
     throw error;
   }
   return ok(
     context,
-    uploadAuthorizationView(
-      await requireUploadSession(context.env.DB, actor, projectId, id),
-      positiveInteger(context.env.MULTIPART_PART_BYTES, 16 * 1024 * 1024),
-    ),
+    uploadAuthorizationView(await requireUploadSession(context.env.DB, actor, projectId, id)),
     201,
   );
 });
@@ -291,11 +284,21 @@ fileRoutes.put("/uploads/:uploadSessionId/content", async (context) => {
 
   const existing = await context.env.FILES.head(session.object_key);
   if (!existing) {
-    await context.env.DB.prepare(
-      "UPDATE upload_sessions SET state = 'uploading', updated_at = ?1 WHERE id = ?2 AND state = 'authorized'",
+    const claimedAt = Date.now();
+    const claim = await context.env.DB.prepare(
+      `UPDATE upload_sessions SET state = 'uploading', error_code = NULL, updated_at = ?1
+        WHERE id = ?2 AND completed_file_version_id IS NULL
+          AND (state = 'authorized' OR (state = 'uploading' AND updated_at < ?3))`,
     )
-      .bind(Date.now(), session.id)
+      .bind(claimedAt, session.id, claimedAt - 60_000)
       .run();
+    if ((claim.meta.changes ?? 0) !== 1) {
+      throw new HttpError(
+        409,
+        "upload_in_progress",
+        "This upload is already being processed. Retry after the current request finishes.",
+      );
+    }
     try {
       await context.env.FILES.put(session.object_key, context.req.raw.body, {
         onlyIf: { etagDoesNotMatch: "*" },
@@ -312,11 +315,17 @@ fileRoutes.put("/uploads/:uploadSessionId/content", async (context) => {
         sha256: hexToArrayBuffer(session.intended_sha256),
       });
     } catch {
-      await markUploadFailed(context.env.DB, session.id, "checksum_or_storage_failure");
+      await context.env.DB.prepare(
+        `UPDATE upload_sessions SET state = 'authorized', error_code = 'checksum_or_storage_failure',
+                  updated_at = ?1
+          WHERE id = ?2 AND completed_file_version_id IS NULL AND state = 'uploading'`,
+      )
+        .bind(Date.now(), session.id)
+        .run();
       throw new HttpError(
         409,
         "upload_integrity_failed",
-        "R2 rejected the upload or its checksum.",
+        "Private storage rejected the upload or its checksum.",
       );
     }
   }
@@ -324,166 +333,20 @@ fileRoutes.put("/uploads/:uploadSessionId/content", async (context) => {
   return ok(context, await verifyAndFinalize(context, actor, refreshed));
 });
 
-fileRoutes.put("/uploads/:uploadSessionId/parts/:partNumber", async (context) => {
-  const actor = context.get("actor");
-  const projectId = requiredParam(context.req.param("projectId"), "projectId");
-  const sessionId = requiredParam(context.req.param("uploadSessionId"), "uploadSessionId");
-  const partNumber = z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(MULTIPART_MAX_PARTS)
-    .parse(context.req.param("partNumber"));
-  await assertProjectAccess(context.env.DB, actor, projectId, "edit");
-  const session = await requireUploadSession(context.env.DB, actor, projectId, sessionId);
-  assertUploadSessionWritable(session, actor, "multipart");
-  if (!session.multipart_upload_id)
-    throw new HttpError(
-      409,
-      "multipart_state_missing",
-      "The multipart upload state is unavailable.",
-    );
-  if (!context.req.raw.body)
-    throw new HttpError(422, "upload_body_required", "The upload part body is required.");
-  const expectedPartSize = positiveInteger(context.env.MULTIPART_PART_BYTES, 16 * 1024 * 1024);
-  const partCount = Math.ceil(session.intended_byte_size / expectedPartSize);
-  if (partNumber > partCount)
-    throw new HttpError(
-      422,
-      "invalid_upload_part",
-      "The part number exceeds this upload's authorized range.",
-    );
-  const expectedSize =
-    partNumber === partCount
-      ? session.intended_byte_size - expectedPartSize * (partCount - 1)
-      : expectedPartSize;
-  if (expectedSize < MULTIPART_MIN_PART_BYTES && partNumber !== partCount) {
-    throw new HttpError(
-      422,
-      "invalid_part_size",
-      "Multipart parts other than the final part must be at least 5 MiB.",
-    );
-  }
-  if (expectedSize > MULTIPART_MAX_PART_BYTES)
-    throw new HttpError(413, "invalid_part_size", "Multipart parts may not exceed 100 MiB.");
-  assertUploadBodyHeaders(context.req.raw, session, expectedSize, true);
-  const expectedDigest = context.req.header("X-Content-SHA256");
-  if (!expectedDigest || !/^[0-9a-f]{64}$/u.test(expectedDigest)) {
-    throw new HttpError(
-      422,
-      "checksum_required",
-      "Each multipart part requires a lowercase hexadecimal SHA-256 checksum.",
-    );
-  }
-  const upload = context.env.FILES.resumeMultipartUpload(
-    session.object_key,
-    session.multipart_upload_id,
+fileRoutes.put("/uploads/:uploadSessionId/parts/:partNumber", () => {
+  throw new HttpError(
+    409,
+    "multipart_not_available",
+    "Multipart uploads are unavailable in the no-subscription storage profile.",
   );
-  const consumed = await consumeStreamWithSha256(context.req.raw.body, (body) =>
-    upload.uploadPart(partNumber, body),
-  );
-  if (consumed.byteSize !== expectedSize || consumed.sha256 !== expectedDigest) {
-    throw new HttpError(
-      409,
-      "upload_part_integrity_failed",
-      "The multipart part did not match its authorized size and checksum.",
-    );
-  }
-  const now = Date.now();
-  await context.env.DB.batch([
-    context.env.DB.prepare(
-      `INSERT INTO upload_parts (upload_session_id, part_number, etag, byte_size, sha256, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(upload_session_id, part_number) DO UPDATE SET
-           etag = excluded.etag, byte_size = excluded.byte_size, sha256 = excluded.sha256, created_at = excluded.created_at`,
-    ).bind(session.id, partNumber, consumed.result.etag, consumed.byteSize, consumed.sha256, now),
-    context.env.DB.prepare(
-      "UPDATE upload_sessions SET state = 'uploading', updated_at = ?1 WHERE id = ?2 AND state IN ('authorized', 'uploading')",
-    ).bind(now, session.id),
-  ]);
-  return ok(context, {
-    partNumber,
-    etag: consumed.result.etag,
-    byteSize: consumed.byteSize,
-    sha256: consumed.sha256,
-  });
 });
 
-fileRoutes.post("/uploads/:uploadSessionId/complete", requireJson, async (context) => {
-  const actor = context.get("actor");
-  const projectId = requiredParam(context.req.param("projectId"), "projectId");
-  const sessionId = requiredParam(context.req.param("uploadSessionId"), "uploadSessionId");
-  multipartCompleteSchema.parse(await context.req.json());
-  await assertProjectAccess(context.env.DB, actor, projectId, "edit");
-  const session = await requireUploadSession(context.env.DB, actor, projectId, sessionId);
-  if (session.completed_file_version_id)
-    return ok(context, await completedUploadView(context.env.DB, session));
-  assertUploadSessionWritable(session, actor, "multipart");
-  if (!session.multipart_upload_id)
-    throw new HttpError(
-      409,
-      "multipart_state_missing",
-      "The multipart upload state is unavailable.",
-    );
-  const partSize = positiveInteger(context.env.MULTIPART_PART_BYTES, 16 * 1024 * 1024);
-  const expectedParts = Math.ceil(session.intended_byte_size / partSize);
-  const rows = await context.env.DB.prepare(
-    "SELECT part_number, etag, byte_size, sha256 FROM upload_parts WHERE upload_session_id = ?1 ORDER BY part_number",
-  )
-    .bind(session.id)
-    .all<UploadPartRow>();
-  if (
-    rows.results.length !== expectedParts ||
-    rows.results.some((part, index) => part.part_number !== index + 1)
-  ) {
-    throw new HttpError(
-      409,
-      "multipart_incomplete",
-      "Upload every required part before completing this file.",
-    );
-  }
-  const upload = context.env.FILES.resumeMultipartUpload(
-    session.object_key,
-    session.multipart_upload_id,
+fileRoutes.post("/uploads/:uploadSessionId/complete", requireJson, () => {
+  throw new HttpError(
+    409,
+    "multipart_not_available",
+    "Multipart uploads are unavailable in the no-subscription storage profile.",
   );
-  await context.env.DB.prepare(
-    "UPDATE upload_sessions SET state = 'verifying', updated_at = ?1 WHERE id = ?2 AND state IN ('authorized', 'uploading')",
-  )
-    .bind(Date.now(), session.id)
-    .run();
-  try {
-    await upload.complete(
-      rows.results.map((part) => ({ partNumber: part.part_number, etag: part.etag })),
-    );
-  } catch {
-    const object = await context.env.FILES.head(session.object_key);
-    if (!object) {
-      await markUploadFailed(context.env.DB, session.id, "multipart_completion_failed");
-      throw new HttpError(
-        409,
-        "multipart_completion_failed",
-        "The multipart upload could not be completed.",
-      );
-    }
-  }
-  const stored = await context.env.FILES.get(session.object_key);
-  if (!stored)
-    throw new HttpError(
-      409,
-      "upload_object_missing",
-      "The completed object was not found in private storage.",
-    );
-  const digest = await sha256HexFromStream(stored.body);
-  if (digest !== session.intended_sha256) {
-    await markUploadFailed(context.env.DB, session.id, "upload_checksum_mismatch");
-    throw new HttpError(
-      409,
-      "upload_checksum_mismatch",
-      "The completed upload checksum did not match.",
-    );
-  }
-  const refreshed = await requireUploadSession(context.env.DB, actor, projectId, session.id);
-  return ok(context, await verifyAndFinalize(context, actor, refreshed, digest));
 });
 
 fileRoutes.post("/uploads/:uploadSessionId/abort", async (context) => {
@@ -500,13 +363,7 @@ fileRoutes.post("/uploads/:uploadSessionId/abort", async (context) => {
       "upload_already_complete",
       "A completed immutable file version cannot be aborted.",
     );
-  if (session.upload_mode === "multipart" && session.multipart_upload_id) {
-    await context.env.FILES.resumeMultipartUpload(session.object_key, session.multipart_upload_id)
-      .abort()
-      .catch(() => undefined);
-  } else {
-    await context.env.FILES.delete(session.object_key);
-  }
+  await context.env.FILES.delete(session.object_key);
   await context.env.DB.prepare(
     "UPDATE upload_sessions SET state = 'aborted', updated_at = ?1 WHERE id = ?2 AND completed_file_version_id IS NULL",
   )
@@ -664,6 +521,10 @@ fileRoutes.get("/:fileId/versions/:versionId/download", async (context) => {
   const fileId = requiredParam(context.req.param("fileId"), "fileId");
   const versionId = requiredParam(context.req.param("versionId"), "versionId");
   await assertProjectAccess(context.env.DB, actor, projectId);
+  const file = await requireFile(context.env.DB, actor, projectId, fileId, true);
+  if (file.status === "cloud_removed") {
+    throw new HttpError(404, "not_found", "The private file body is no longer available.");
+  }
   const version = await requireFileVersion(
     context.env.DB,
     actor.workspaceId,
@@ -849,11 +710,7 @@ fileRoutes.post("/:fileId/remove-cloud-copy", requireJson, async (context) => {
     .run();
   try {
     await assertNoActiveLegalHold(context.env.DB, actor.workspaceId, projectId, file.id);
-    await context.env.FILES.delete(versions.results.map((version) => version.object_key));
     await context.env.DB.batch([
-      context.env.DB.prepare(
-        "UPDATE retention_actions SET status = 'completed', completed_at = ?1 WHERE id = ?2 AND status = 'approved'",
-      ).bind(Date.now(), retentionId),
       context.env.DB.prepare(
         "UPDATE files SET status = 'cloud_removed', version = version + 1, updated_at = ?1 WHERE id = ?2 AND workspace_id = ?3 AND project_id = ?4",
       ).bind(Date.now(), file.id, actor.workspaceId, projectId),
@@ -861,7 +718,7 @@ fileRoutes.post("/:fileId/remove-cloud-copy", requireJson, async (context) => {
         workspaceId: actor.workspaceId,
         projectId,
         actor,
-        action: "file.cloud_copy_removed",
+        action: "file.cloud_copy_access_revoked",
         objectType: "file",
         objectId: file.id,
         requestId: context.get("requestId"),
@@ -870,6 +727,22 @@ fileRoutes.post("/:fileId/remove-cloud-copy", requireJson, async (context) => {
           archiveJobId: verifiedArchive,
           versionCount: versions.results.length,
         },
+      }),
+    ]);
+    await context.env.FILES.delete(versions.results.map((version) => version.object_key));
+    await context.env.DB.batch([
+      context.env.DB.prepare(
+        "UPDATE retention_actions SET status = 'completed', completed_at = ?1 WHERE id = ?2 AND status = 'approved'",
+      ).bind(Date.now(), retentionId),
+      auditStatement(context.env.DB, {
+        workspaceId: actor.workspaceId,
+        projectId,
+        actor,
+        action: "file.cloud_copy_removed",
+        objectType: "file",
+        objectId: file.id,
+        requestId: context.get("requestId"),
+        details: { retentionActionId: retentionId, archiveJobId: verifiedArchive },
       }),
     ]);
   } catch (error) {
@@ -893,9 +766,9 @@ async function verifyAndFinalize(
   const head = await context.env.FILES.head(session.object_key);
   if (!head)
     throw new HttpError(
-      409,
-      "upload_object_missing",
-      "The uploaded object was not found in private storage.",
+      503,
+      "upload_storage_propagating",
+      "The uploaded object is still propagating through private storage. Retry this upload shortly.",
     );
   const storedChecksum =
     computedChecksum ??
@@ -1245,7 +1118,7 @@ async function completedUploadView(db: D1Database, session: UploadSessionRow) {
   };
 }
 
-function uploadAuthorizationView(session: UploadSessionRow, multipartPartBytes: number) {
+function uploadAuthorizationView(session: UploadSessionRow) {
   const base = `/api/v1/app/projects/${encodeURIComponent(session.project_id)}/files/uploads/${encodeURIComponent(session.id)}`;
   return {
     id: session.id,
@@ -1256,11 +1129,11 @@ function uploadAuthorizationView(session: UploadSessionRow, multipartPartBytes: 
     mimeType: session.intended_mime_type,
     sha256: session.intended_sha256,
     expiresAt: session.expires_at,
-    contentHref: session.upload_mode === "single" ? `${base}/content` : null,
-    partHrefTemplate: session.upload_mode === "multipart" ? `${base}/parts/{partNumber}` : null,
-    completeHref: session.upload_mode === "multipart" ? `${base}/complete` : null,
+    contentHref: `${base}/content`,
+    partHrefTemplate: null,
+    completeHref: null,
     abortHref: `${base}/abort`,
-    multipartPartBytes: session.upload_mode === "multipart" ? multipartPartBytes : null,
+    multipartPartBytes: null,
     scanState: "not_configured" as const,
   };
 }
@@ -1411,13 +1284,39 @@ async function guardedFileBatch(
   }
 }
 
-async function markUploadFailed(db: D1Database, sessionId: string, code: string): Promise<void> {
-  await db
+async function assertStorageBudget(
+  db: D1Database,
+  workspaceId: string,
+  requestedBytes: number,
+  budgetBytes: number,
+): Promise<void> {
+  const usage = await db
     .prepare(
-      "UPDATE upload_sessions SET state = 'failed', error_code = ?1, updated_at = ?2 WHERE id = ?3 AND completed_file_version_id IS NULL",
+      `SELECT
+         COALESCE((SELECT SUM(byte_size) FROM file_versions WHERE workspace_id = ?1), 0) +
+         COALESCE((SELECT SUM(intended_byte_size) FROM upload_sessions
+                    WHERE workspace_id = ?1 AND completed_file_version_id IS NULL
+                      AND state IN ('authorized', 'uploading', 'verifying')), 0) +
+         COALESCE((SELECT SUM(emi.byte_size)
+                     FROM export_manifest_items emi
+                     JOIN export_snapshots es ON es.id = emi.export_snapshot_id
+                    WHERE es.workspace_id = ?1 AND emi.file_version_id IS NULL), 0)
+           AS used_bytes`,
     )
-    .bind(code, Date.now(), sessionId)
-    .run();
+    .bind(workspaceId)
+    .first<{ used_bytes: number }>();
+  const usedBytes = Number(usage?.used_bytes ?? 0);
+  if (!Number.isSafeInteger(usedBytes) || usedBytes < 0) {
+    throw new HttpError(503, "storage_usage_unavailable", "Private storage usage is unavailable.");
+  }
+  if (usedBytes + requestedBytes > budgetBytes) {
+    throw new HttpError(
+      409,
+      "storage_budget_exceeded",
+      "The 1 GB no-subscription storage budget would be exceeded.",
+      { usedBytes, requestedBytes, budgetBytes },
+    );
+  }
 }
 
 async function assertNoActiveLegalHold(

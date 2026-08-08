@@ -8,7 +8,7 @@ The complete local pre-production release is implemented and verified. Productio
 
 - React and TypeScript web application served by a Cloudflare Worker
 - Hono resource API with first-party authentication and server-side authorization
-- Cloudflare D1 for relational state, private R2 for immutable file versions and large snapshots
+- Cloudflare D1 for relational state and private Workers KV for immutable file versions and bounded snapshots
 - Cloudflare Workflows for durable export and archive jobs
 - A narrowly scoped Durable Object channel for collaboration invalidation and presence
 - Shared domain package for identifiers, calculations, sync, conflicts, readiness, and authorization
@@ -72,19 +72,45 @@ Core workflows remain usable through secure links, downloads, browser printing/S
 
 Files use a logical record with immutable versions and a current-version pointer. Issued artifacts pin exact revisions and file versions. The complete-project export has a versioned JSON schema and checksum manifest.
 
+The current deploy/test profile deliberately requires no payment card or subscription: private byte objects use Workers KV through a storage-neutral immutable adapter. It enforces a 25 MiB maximum per file, a 1 GB (`1000000000` bytes) total workspace storage budget, and the free-profile ceiling of 1,000 writes per day. Uploads are single-request only; multipart is not claimed. KV propagation is eventually consistent, so a just-written object may report a visible retriable state before it is treated as missing or corrupt.
+
+R2 is not required for the current release. It remains an optional future capacity migration behind the same adapter if the owner later approves a paid or separately provisioned object-storage profile.
+
 Archiving is three separate actions:
 
-1. create an immutable cloud export and request an archive job;
+1. create an immutable cloud export and, when the later NAS integration is configured, request an archive job;
 2. verify an outbound NAS-agent transfer by size and checksum;
 3. optionally remove an eligible cloud copy through a separate owner-only retention action.
 
-Archive completion never deletes cloud data. See `docs/backup-and-nas.md`.
+The NAS agent and protocol are implemented and locally verified, but production NAS credentials, host, mount, and destination are intentionally later operational prerequisites. Archive completion never deletes cloud data. See `docs/backup-and-nas.md`.
 
 ## Deployment
 
 Production targets the unique `sinbod-wayne-productions` Worker and `productions.sinbodwayne.nl`. It must not modify Filmcraft Studio resources or its domain. Remote migration, bootstrap, custom-domain, smoke-test, and rollback procedures are in `docs/deployment.md`.
 
-No deployment step should run until the operator has verified the Cloudflare account, environment, resource identifiers, backups, migration target, and authorization. Missing cloud authorization does not block a complete local implementation.
+No deployment step should run until the operator has verified the Cloudflare account, environment, D1 and KV resource identifiers, backups, migration target, and authorization. The checked-in configuration contains separate all-zero placeholders for both D1 and KV. Missing cloud authorization does not block a complete local implementation, and production NAS setup is not part of the initial cloud deployment.
+
+With explicit Cloudflare authorization, create or identify the two state resources from the repository root:
+
+```text
+cd apps/web
+npx wrangler whoami
+npx wrangler d1 list
+npx wrangler kv namespace list
+npx wrangler d1 create sinbod-wayne-productions-db
+npx wrangler kv namespace create sinbod-wayne-productions-files --binding FILE_OBJECTS
+cd ../..
+```
+
+Do not add `--update-config`. In `apps/web/wrangler.jsonc`, replace only `d1_databases[0].database_id` (`00000000-0000-0000-0000-000000000000`) and `kv_namespaces[0].id` (`00000000000000000000000000000000`) with the reviewed IDs, while preserving bindings `DB` and `FILE_OBJECTS`. Confirm no placeholder remains:
+
+```text
+rg -n '00000000-0000-0000-0000-000000000000|00000000000000000000000000000000' apps/web/wrangler.jsonc
+```
+
+No output is expected. Continue with the reviewed migration/bootstrap/deploy sequence in `docs/deployment.md`; this README does not claim that those remote actions have run.
+
+For Cloudflare Git builds, use repository root `/`, build command `npx --yes npm@11 ci && npx --yes npm@11 run build --workspace @swp/domain && npx --yes npm@11 run build --workspace @swp/web`, deploy command `npx --yes npm@11 run deploy`, and environment variable `NODE_VERSION=24`. Add no application secret variables. The deploy lifecycle runs the checked-in preflight and rejects either remaining D1/KV placeholder; see `docs/deployment.md` for the full review gate.
 
 ## Security and privacy
 

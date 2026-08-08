@@ -75,7 +75,9 @@ export function ExportsArchivePage() {
         <div>
           <Archive aria-hidden="true" />
           <strong>1. Snapshot</strong>
-          <span>Structured project data and exact file versions are pinned in private R2.</span>
+          <span>
+            Structured project data and exact file versions are pinned in private storage.
+          </span>
         </div>
         <div>
           <HardDriveDownload aria-hidden="true" />

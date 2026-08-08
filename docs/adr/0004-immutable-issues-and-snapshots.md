@@ -22,7 +22,7 @@ An issue/snapshot contains or references canonical structured content, the exact
 
 Corrections create a new issue with `supersedes_id`. Current-state projections can mark an issue Stale or Superseded and list exact change events, but do not edit the frozen issue body. Restores create a new revision/head transition.
 
-Large canonical bodies live in private R2 with immutable D1 metadata and pins. Small bounded rule/decision snapshots may live in D1 JSON when schema-versioned.
+Bounded canonical byte bodies live in the configured private object store with immutable D1 metadata and pins. The current no-subscription backend is Workers KV with a 25 MiB per-object ceiling; larger logical exports are manifest-backed collections of bounded objects. Small bounded rule/decision snapshots may live in D1 JSON when schema-versioned.
 
 ## Consequences
 

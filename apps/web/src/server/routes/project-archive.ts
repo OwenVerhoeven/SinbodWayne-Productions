@@ -17,10 +17,11 @@ import {
 import { ok } from "../http/envelope";
 import { HttpError } from "../http/errors";
 import { requireJson, requireSameOrigin } from "../http/security";
-import type { AppEnv } from "../http/types";
+import type { AppEnv, ApplicationBindings } from "../http/types";
+import { PRIVATE_OBJECT_MAX_BYTES, type PrivateObjectStore } from "../storage/private-object-store";
 
 const EXPORT_SCHEMA_VERSION = "1.0";
-const MAX_EXPORT_BYTES = 50 * 1024 * 1024;
+const MAX_EXPORT_BYTES = PRIVATE_OBJECT_MAX_BYTES;
 const TABLE_PAGE_SIZE = 1_000;
 
 const requestSchema = z
@@ -348,7 +349,7 @@ projectArchiveRoutes.get("/snapshots/:snapshotId/manifest", async (context) => {
 });
 
 async function startArchiveWorkflow(
-  env: CloudflareBindings,
+  env: ApplicationBindings,
   jobId: string,
   db: D1Database,
   workspaceId: string,
@@ -461,7 +462,7 @@ async function tableColumns(db: D1Database, tableName: string): Promise<string[]
 }
 
 async function generatedItems(input: {
-  bucket: R2Bucket;
+  bucket: PrivateObjectStore;
   prefix: string;
   project: ProjectRow;
   projectRoot: string;
@@ -506,7 +507,7 @@ async function generatedItems(input: {
 }
 
 async function createProjectManifest(input: {
-  bucket: R2Bucket;
+  bucket: PrivateObjectStore;
   prefix: string;
   project: ProjectRow;
   projectRoot: string;
@@ -545,7 +546,7 @@ async function createProjectManifest(input: {
 }
 
 async function createChecksumItem(input: {
-  bucket: R2Bucket;
+  bucket: PrivateObjectStore;
   prefix: string;
   projectRoot: string;
   items: readonly ExportItem[];
@@ -568,7 +569,7 @@ async function createChecksumItem(input: {
 }
 
 async function putGenerated(
-  bucket: R2Bucket,
+  bucket: PrivateObjectStore,
   key: string,
   bytes: Uint8Array,
   mimeType: string,
@@ -827,7 +828,7 @@ async function requireSnapshot(
 }
 
 async function streamExportObject(
-  bucket: R2Bucket,
+  bucket: PrivateObjectStore,
   objectKey: string,
   fileName: string,
   fallbackType: string,

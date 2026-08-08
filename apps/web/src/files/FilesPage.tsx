@@ -11,6 +11,8 @@ import type { AppOutletContext } from "../app/AppShell";
 import { ProjectContextHeader } from "../app/ProjectContextHeader";
 import { ShareLinksPanel } from "../shares/ShareLinksPanel";
 
+const MAX_TEST_FILE_BYTES = 25 * 1024 * 1024;
+
 const currentVersionSchema = z.object({
   id: z.string(),
   versionNumber: z.number(),
@@ -57,7 +59,7 @@ const fileDetailSchema = z.object({ file: fileSchema, versions: z.array(versionS
 const uploadAuthorizationSchema = z.object({
   id: z.string(),
   fileId: z.string().nullable(),
-  mode: z.enum(["single", "multipart"]),
+  mode: z.literal("single"),
   state: z.string(),
   byteSize: z.number(),
   mimeType: z.string(),
@@ -76,12 +78,6 @@ const uploadCompleteSchema = z.object({
   fileId: z.string(),
   version: versionSchema,
 });
-const partSchema = z.object({
-  partNumber: z.number(),
-  etag: z.string(),
-  byteSize: z.number(),
-  sha256: z.string(),
-});
 type FileItem = z.infer<typeof fileListItemSchema>;
 type UploadAuthorization = z.infer<typeof uploadAuthorizationSchema>;
 
@@ -95,6 +91,7 @@ export function FilesPage() {
   const [uploadFile, setUploadFile] = useState<File>();
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStage, setUploadStage] = useState<string>();
+  const [selectionError, setSelectionError] = useState<string>();
   const [uploadResume, setUploadResume] = useState<{
     file: File;
     checksum: string;
@@ -177,48 +174,14 @@ export function FilesPage() {
       }
       const { authorization, checksum } = resumed;
       try {
-        if (authorization.mode === "single" && authorization.contentHref) {
-          setUploadStage("Uploading and verifying private object");
-          setUploadProgress(35);
-          const result = await apiRequest(authorization.contentHref, uploadCompleteSchema, {
-            method: "PUT",
-            headers: { "Content-Type": authorization.mimeType, "X-Content-SHA256": checksum },
-            body: input.file,
-          });
-          setUploadProgress(100);
-          return result;
-        }
-        if (
-          !authorization.partHrefTemplate ||
-          !authorization.completeHref ||
-          !authorization.multipartPartBytes
-        )
-          throw new Error("Multipart authorization is incomplete.");
-        const partCount = Math.ceil(input.file.size / authorization.multipartPartBytes);
-        for (let index = 0; index < partCount; index += 1) {
-          const start = index * authorization.multipartPartBytes;
-          const part = input.file.slice(
-            start,
-            Math.min(input.file.size, start + authorization.multipartPartBytes),
-            authorization.mimeType,
-          );
-          setUploadStage(`Uploading part ${index + 1} of ${partCount}`);
-          const partHash = await hashBlob(part);
-          await apiRequest(
-            authorization.partHrefTemplate.replace("{partNumber}", String(index + 1)),
-            partSchema,
-            {
-              method: "PUT",
-              headers: { "Content-Type": authorization.mimeType, "X-Content-SHA256": partHash },
-              body: part,
-            },
-          );
-          setUploadProgress(25 + Math.round(((index + 1) / partCount) * 65));
-        }
-        setUploadStage("Verifying multipart object");
-        const result = await apiRequest(authorization.completeHref, uploadCompleteSchema, {
-          method: "POST",
-          body: jsonBody({}),
+        if (!authorization.contentHref)
+          throw new Error("Single-upload authorization is incomplete.");
+        setUploadStage("Uploading and verifying private object");
+        setUploadProgress(35);
+        const result = await apiRequest(authorization.contentHref, uploadCompleteSchema, {
+          method: "PUT",
+          headers: { "Content-Type": authorization.mimeType, "X-Content-SHA256": checksum },
+          body: input.file,
         });
         setUploadProgress(100);
         return result;
@@ -244,9 +207,15 @@ export function FilesPage() {
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     if (file) {
-      setUploadFile(file);
       setUploadProgress(0);
-      setUploadStage(undefined);
+      if (file.size > MAX_TEST_FILE_BYTES) {
+        setUploadFile(undefined);
+        setSelectionError("That file is larger than the 25 MiB test-storage limit.");
+      } else {
+        setUploadFile(file);
+        setSelectionError(undefined);
+        setUploadStage(undefined);
+      }
     }
     event.currentTarget.value = "";
   }
@@ -300,10 +269,22 @@ export function FilesPage() {
       />
       <div className="page-intro">
         <p>
-          Private logical files with immutable, checksummed R2 versions. Scan delivery is shown
-          honestly when no provider is configured.
+          Private logical files with immutable, checksummed versions. The no-subscription test
+          profile uses Workers KV and can later migrate behind the same storage interface.
         </p>
       </div>
+      <div className="provider-state">
+        <Status tone="success">No subscription</Status>
+        <span>
+          Private test storage: 25 MiB per file, 1 GB total, and up to 1,000 writes per day. Large
+          media and NAS archival can be added later without changing logical file IDs.
+        </span>
+      </div>
+      {selectionError ? (
+        <p className="form-error" role="alert">
+          {selectionError}
+        </p>
+      ) : null}
       <div className="provider-state">
         <Status tone="warning">Not configured</Status>
         <span>
@@ -581,11 +562,6 @@ async function hashFile(file: File, progress: (value: number) => void): Promise<
     );
     progress(Math.min(1, (offset + chunkBytes) / file.size));
   }
-  return hasher.digest("hex");
-}
-async function hashBlob(blob: Blob): Promise<string> {
-  const hasher = await createSHA256();
-  hasher.update(new Uint8Array(await blob.arrayBuffer()));
   return hasher.digest("hex");
 }
 function formatBytes(value: number): string {

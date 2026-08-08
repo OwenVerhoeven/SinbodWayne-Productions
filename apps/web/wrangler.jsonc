@@ -15,15 +15,15 @@
     {
       "binding": "DB",
       "database_name": "sinbod-wayne-productions-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "c41acb5d-dac1-490c-94cf-95539dfcab42",
       "migrations_dir": "migrations",
       "migrations_table": "d1_migrations",
     },
   ],
-  "r2_buckets": [
+  "kv_namespaces": [
     {
-      "binding": "FILES",
-      "bucket_name": "sinbod-wayne-productions-files",
+      "binding": "FILE_OBJECTS",
+      "id": "7e2bd4dc161247c6abbd794ff3b8c28b",
     },
   ],
   "durable_objects": {
@@ -71,9 +71,9 @@
     "APP_LOCALE": "en-GB",
     "SESSION_IDLE_SECONDS": "1800",
     "SESSION_ABSOLUTE_SECONDS": "28800",
-    "UPLOAD_MAX_BYTES": "2147483648",
-    "MULTIPART_THRESHOLD_BYTES": "33554432",
-    "MULTIPART_PART_BYTES": "16777216",
+    "UPLOAD_MAX_BYTES": "26214400",
+    "FILE_STORAGE_TOTAL_BUDGET_BYTES": "1000000000",
+    "FILE_STORAGE_BACKEND": "workers_kv_free",
   },
   "routes": [
     {

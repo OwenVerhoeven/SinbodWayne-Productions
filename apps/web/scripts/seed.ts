@@ -21,8 +21,8 @@ import {
 import {
   applyLocalMigrations,
   executeD1SqlFile,
-  getLocalR2Object,
-  putLocalR2Object,
+  getLocalKvObject,
+  putLocalKvObject,
   queryD1,
 } from "./lib/wrangler-runner";
 
@@ -438,13 +438,13 @@ async function main(): Promise<void> {
   await assertIsolatedSeedTarget(persistencePath);
   const objects = createTestSeedObjects();
   for (const object of objects) {
-    await putLocalR2Object(object.objectKey, object.bytes, object.contentType, persistencePath);
+    await putLocalKvObject(object.objectKey, object.bytes, object.contentType, persistencePath);
   }
   for (const object of objects) {
-    const stored = await getLocalR2Object(object.objectKey, persistencePath);
+    const stored = await getLocalKvObject(object.objectKey, persistencePath);
     const storedHash = createHash("sha256").update(stored).digest("hex");
     if (stored.byteLength !== object.bytes.byteLength || storedHash !== object.sha256) {
-      throw new Error(`Local R2 fixture verification failed for ${object.label}.`);
+      throw new Error(`Local KV fixture verification failed for ${object.label}.`);
     }
   }
   const credentials = await createTestSeedCredentials();

@@ -3,6 +3,7 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloud
 import { ArchiveServiceError } from "../server/archive/errors";
 import { ArchiveCoordinator } from "../server/archive/service";
 import { archiveWorkflowPayloadSchema, type ArchiveWorkflowPayload } from "../server/archive/types";
+import { applicationBindings } from "../server/http/types";
 
 export class ArchiveWorkflow extends WorkflowEntrypoint<
   CloudflareBindings,
@@ -13,7 +14,7 @@ export class ArchiveWorkflow extends WorkflowEntrypoint<
     step: WorkflowStep,
   ): Promise<{ readonly archiveJobId: string }> {
     const payload = archiveWorkflowPayloadSchema.parse(event.payload);
-    const coordinator = ArchiveCoordinator.fromBindings(this.env);
+    const coordinator = ArchiveCoordinator.fromBindings(applicationBindings(this.env));
     const stepPrefix = `archive:${payload.archiveJobId}`;
 
     try {

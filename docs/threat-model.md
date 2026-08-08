@@ -2,7 +2,7 @@
 
 ## Overview
 
-Sinbod Wayne Productions is an internet-reachable but private two-person pre-production workspace. The Worker serves a React application and resource-oriented API; D1 stores normalized project and authorization data; private R2 stores immutable file versions and large issued/export snapshots; Workflows coordinate durable export/archive jobs; a focused Durable Object distributes project invalidation/presence signals; and a Node-based outbound NAS agent transfers verified archive packages to a private destination.
+Sinbod Wayne Productions is an internet-reachable but private two-person pre-production workspace. The Worker serves a React application and resource-oriented API; D1 stores normalized project, authorization, quota, and integrity data; private Workers KV stores bounded immutable file versions and issued/export objects behind a storage adapter; Workflows coordinate durable export/archive jobs; and a focused Durable Object distributes project invalidation/presence signals. The Node-based outbound NAS agent is implemented and locally tested, while production NAS provisioning is a later optional operational step.
 
 The highest-value assets are:
 
@@ -11,7 +11,7 @@ The highest-value assets are:
 - canonical production relationships, especially stable scene identity and downstream links;
 - immutable revisions, approvals, call sheets, sides, packs, readiness issues, file versions, exports, checksums, and archive acknowledgements;
 - authority to provision identities, transfer ownership, override restricted readiness checks, bypass retention/legal holds, remove cloud copies, deploy, or rotate archive credentials;
-- availability of the planning workspace and recoverability of its D1/R2/NAS data.
+- availability of the planning workspace and recoverability of its D1/KV data plus any later verified NAS archive.
 
 Primary runtime surfaces are expected under `apps/web`, `apps/nas-agent`, `packages/domain`, and `packages/ui`. Migrations and configuration define security boundaries even though they are not direct request handlers. Test fixtures and local seed tools are developer-controlled, but become critical if production can execute or import them.
 
@@ -35,7 +35,7 @@ The repository is at initial construction. Controls described here are requireme
 1. **Internet → edge application:** anonymous traffic crosses Cloudflare controls into login, public-link, webhook, and static routes. Route grouping, content validation, rate limits, security headers, and response redaction are required.
 2. **Browser → authenticated API:** a cookie proves a session, not authorization to the requested workspace/project/object/field. Same-origin and CSRF controls protect mutation; every ID is attacker controlled.
 3. **External-link context → project data:** a public identifier and exchanged secret may grant a narrow session. It must not share the authenticated app cookie, reveal other recipients or identities, or expand through common object references.
-4. **Worker → Cloudflare state:** bindings are privileged. D1 queries must preserve tenant/object ownership; R2 keys and bodies must be scoped and private; Workflow and Durable Object messages must be authenticated/validated and idempotent.
+4. **Worker → Cloudflare state:** bindings are privileged. D1 queries must preserve tenant/object ownership; KV keys, metadata, quotas, and bodies must be scoped and private; Workflow and Durable Object messages must be authenticated/validated and idempotent.
 5. **Mutable graph → issued truth:** screenplay drafts, schedule variants, calls, packs, and readiness sources change. Immutable revision pins, integrity values, explicit sync, and supersession prevent current pointers from rewriting historical truth.
 6. **Upload/import/rich content → stored/rendered data:** files, Fountain/FDX/TXT/CSV, URLs, annotations, and structured rich text are untrusted. Bounded parsing, media validation, sanitization, quarantine/scan seams, and safe rendering prevent code/content confusion.
 7. **Cloud archive → NAS agent:** the agent receives leased manifests and scoped download authority, writes into a mounted filesystem, and returns evidence. Every path, size, checksum, retry, free-space observation, staging location, link/reparse point, and acknowledgement is hostile or failure-prone.
@@ -46,7 +46,7 @@ The repository is at initial construction. Controls described here are requireme
 - Cloudflare correctly isolates bindings and protects configured secrets; repository code still validates authorization and does not rely on obscurity.
 - HTTPS terminates correctly in production and the production cookie is secure, host-only, HTTP-only, strict same-site, and narrowly scoped.
 - The two approved users protect their endpoints and voluntarily change credentials when appropriate. The accepted no-forced-first-login-rotation decision does not relax storage, rate-limit, recovery, or session requirements.
-- D1 and R2 are active workspace stores; backups and exports are required because platform durability is not a substitute for tested recovery.
+- D1 and Workers KV are the current active workspace stores; backups and exports are required because platform durability is not a substitute for tested recovery.
 - The NAS destination is administered securely and mounted with suitable permissions. The agent must nevertheless contain malformed manifests and compromised job input within an explicitly configured destination.
 - Optional providers may be absent or fail. Manual operation and truthful status are security and reliability requirements.
 - No character-level real-time merge is promised. Optimistic concurrency and visible draft conflict are the source of truth.
@@ -87,9 +87,9 @@ An owner or compromised account may attempt to rewrite an issued call sheet, pac
 
 ### Files, imports, exports, and storage
 
-Attackers may upload oversized or deceptive content, smuggle active files, overwrite another key, claim a missing upload completed, exploit multipart residue, enumerate private R2, or make a preview/download execute inline. Upload authorization binds operation, tenant, project, key, expected media/size, and expiry. Completion checks R2 evidence, declared/observed metadata and checksum, and scan/quarantine state. Private R2, authorized streamed downloads, safe file names/headers, restricted previews, bounded import, and incomplete-upload cleanup mitigate exposure.
+Attackers may upload oversized or deceptive content, smuggle active files, overwrite another key, claim a missing upload completed, exhaust the 1 GB/1,000-write profile, exploit eventual-consistency timing, enumerate private keys, or make a preview/download execute inline. Upload authorization binds operation, tenant, project, unique key, expected media/size, and expiry. The adapter rejects objects over 25 MiB, calculates and verifies SHA-256 and metadata before completion, enforces the planned total budget, and exposes no multipart path. Authorized Worker downloads, safe names/headers, restricted previews, D1 tombstones, and bounded retriable propagation handling mitigate exposure.
 
-Export/print/ZIP generation may omit permission filters, use current rather than pinned versions, be nondeterministic, consume excessive memory, or include formula/path injection. Permission-aware manifests, deterministic ordering and serialization, immutable job input by reference, streaming to R2, bounded data, safe relative names, CSV escaping, and print privacy fixtures are required.
+Export/print/ZIP generation may omit permission filters, use current rather than pinned versions, be nondeterministic, exceed the KV value ceiling, consume excessive memory, or include formula/path injection. Permission-aware manifests, deterministic ordering and serialization, immutable job input by reference, 25 MiB object bounds, manifest-backed multi-object exports, safe relative names, CSV escaping, and print privacy fixtures are required.
 
 ### Readiness and operational truth
 
@@ -98,6 +98,8 @@ A lower-privilege producer may try to override a restricted legal-hold/archive-i
 The application tracks evidence rather than declaring legal validity, signature authenticity beyond available evidence, or provider delivery without proof.
 
 ### NAS and filesystem boundary
+
+This boundary becomes active only after the later production NAS rollout provisions a host, mount, destination, and service credential. Cloud deployment alone must not claim NAS durability or verification.
 
 A malicious or corrupt manifest may contain absolute paths, traversal, reserved names, collisions, case-equivalent paths, symlink/reparse escapes, inconsistent sizes/checksums, or a path outside the configured archive root. The agent canonicalizes safe relative paths, checks every parent without following unsafe links, rejects collisions and unsafe names, uses job-specific staging inside the validated destination, and never constructs a destructive target from an unresolved environment value.
 
@@ -133,7 +135,7 @@ Structured logs may leak private fields, signed URLs, credentials, or object con
 
 - Producer-to-owner escalation enabling account provisioning, restricted overrides, retention deletion, or ownership control.
 - Cross-project/public-recipient disclosure of finance, legal, casting-private, rates, emergency/health/accessibility/dietary, or private-recipient content.
-- Stored script execution reaching an authenticated owner; arbitrary private R2 read/write; legal-hold bypass; forged Ready to Shoot or archive verification; silent mutation of immutable issued artifacts.
+- Stored script execution reaching an authenticated owner; arbitrary private KV read/write; legal-hold bypass; forged Ready to Shoot or archive verification; silent mutation of immutable issued artifacts.
 - NAS write outside the configured project archive, even if broader system compromise requires environmental permissions.
 
 ### Medium

@@ -20,6 +20,7 @@
     "seed": "npm run seed:test",
     "seed:test": "tsx scripts/seed.ts --target test",
     "seed:local": "tsx scripts/seed.ts --target local",
+    "predeploy": "tsx scripts/deploy-preflight.ts",
     "deploy": "wrangler deploy"
   },
   "dependencies": {

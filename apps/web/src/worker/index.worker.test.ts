@@ -5,6 +5,8 @@ import { applyD1Migrations } from "cloudflare:test";
 import type { D1Migration } from "@cloudflare/vitest-pool-workers";
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { KvPrivateObjectStore } from "../server/storage/private-object-store";
+
 declare global {
   namespace Cloudflare {
     interface Env extends CloudflareBindings {
@@ -36,9 +38,25 @@ describe("Worker boundary", () => {
         status: "healthy",
         database: "available",
         files: "configured",
+        fileStorage: "workers_kv_free",
+        maximumFileBytes: 26_214_400,
+        storageBudgetBytes: 1_000_000_000,
         archive: "configured",
       },
     });
+  });
+
+  it("round-trips an immutable private object through the configured KV binding", async () => {
+    const store = new KvPrivateObjectStore(env.FILE_OBJECTS);
+    const key = `private/integration/${crypto.randomUUID()}`;
+    const stored = await store.put(key, "private integration fixture", {
+      httpMetadata: { contentType: "text/plain" },
+    });
+    expect(stored.size).toBe(27);
+    expect(await (await store.get(key))?.bytes()).toEqual(
+      new TextEncoder().encode("private integration fixture"),
+    );
+    await store.delete(key);
   });
 
   it("returns a generic API 404 with a request identifier", async () => {

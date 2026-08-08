@@ -137,13 +137,17 @@ The readiness engine evaluates project and shoot-day rules for creative approval
 
 ### Complete export and NAS archive
 
-An authorized producer creates an immutable R2 export snapshot and durable archive job. A manifest records versioned project data, safe relative paths, immutable object/revision identifiers, sizes, media types, checksums, and overall integrity. The outbound-only NAS agent leases work, stages transfers, resumes safely, checks space where available, rejects traversal and link escape, verifies size/checksum, syncs durable writes where supported, atomically promotes verified content, and acknowledges idempotently.
+An authorized producer creates an immutable private-cloud export snapshot. In the current no-subscription profile, its byte objects live in private Workers KV behind the immutable storage adapter; D1 holds relational metadata, pins, quotas, checksums, and job state. A manifest records versioned project data, safe relative paths, immutable object/revision identifiers, sizes, media types, checksums, and overall integrity.
+
+The current storage contract is 25 MiB per file/object, 1 GB (`1000000000` bytes) total planned storage, 1,000 writes per day, and single-request uploads only. Workers KV propagation is eventually consistent; recent-write misses are retriable and never silently normalized to success, deletion, or corruption. R2 remains a future optional capacity backend behind the adapter rather than a current requirement.
+
+The outbound-only NAS agent and checksum protocol are implemented and locally tested. Production NAS credential, host, mount, and destination provisioning are a later optional operational phase. When configured, the agent leases work, stages transfers, resumes safely, checks space where available, rejects traversal and link escape, verifies size/checksum, syncs durable writes where supported, atomically promotes verified content, and acknowledges idempotently.
 
 Requested, Running, Verifying, Verified, and Failed are evidence-based job states with attempts and actionable errors. Archive, Verify, and Delete are distinct. Verification never deletes the cloud source.
 
 ## Platform and quality requirements
 
-The baseline stack is a compact npm TypeScript workspace using React, Vite, a Cloudflare Worker/Hono API, D1, Drizzle-style checked-in migrations, private R2, shared boundary schemas, React Router, disciplined query/table state, Workflows, focused Durable Object collaboration, Vitest/Workers integration, Playwright, and a deliberately scoped PWA draft store.
+The baseline stack is a compact npm TypeScript workspace using React, Vite, a Cloudflare Worker/Hono API, D1, Drizzle-style checked-in migrations, private Workers KV through a storage-neutral immutable adapter, shared boundary schemas, React Router, disciplined query/table state, Workflows, focused Durable Object collaboration, Vitest/Workers integration, Playwright, and a deliberately scoped PWA draft store. The baseline requires no payment card or subscription; larger-capacity R2 storage is a future optional migration.
 
 The API uses versioned app/public/service/webhook route groups, typed envelopes, request IDs, complete validation, cursor pagination, optimistic conflict responses, idempotency, redacted structured logs, durable job state, and duplicate-delivery safety.
 

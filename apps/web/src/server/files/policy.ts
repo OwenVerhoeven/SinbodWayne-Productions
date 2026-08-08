@@ -1,9 +1,6 @@
 import { HttpError } from "../http/errors";
 
-export const SINGLE_UPLOAD_MAX_BYTES = 64 * 1024 * 1024;
-export const MULTIPART_MIN_PART_BYTES = 5 * 1024 * 1024;
-export const MULTIPART_MAX_PART_BYTES = 100 * 1024 * 1024;
-export const MULTIPART_MAX_PARTS = 10_000;
+export const SINGLE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 
 const ZIP_MIME_TYPES = new Set([
   "application/zip",
@@ -66,7 +63,7 @@ export function assertUploadIntent(intent: UploadIntent, configuredMaxBytes: num
   const maximum =
     Number.isSafeInteger(configuredMaxBytes) && configuredMaxBytes > 0
       ? configuredMaxBytes
-      : 2 * 1024 * 1024 * 1024;
+      : SINGLE_UPLOAD_MAX_BYTES;
   if (!Number.isSafeInteger(intent.byteSize) || intent.byteSize <= 0 || intent.byteSize > maximum) {
     throw new HttpError(
       413,
@@ -77,8 +74,8 @@ export function assertUploadIntent(intent: UploadIntent, configuredMaxBytes: num
   if (intent.mode === "single" && intent.byteSize > Math.min(maximum, SINGLE_UPLOAD_MAX_BYTES)) {
     throw new HttpError(
       413,
-      "multipart_required",
-      "This file must use the resumable multipart upload path.",
+      "file_too_large",
+      "The no-subscription storage profile accepts files up to 25 MiB.",
     );
   }
   if (!ALLOWED_UPLOAD_MIME_TYPES.has(normaliseMimeType(intent.mimeType))) {

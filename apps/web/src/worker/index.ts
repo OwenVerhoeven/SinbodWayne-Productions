@@ -5,7 +5,11 @@ import { ZodError } from "zod";
 import { errorEnvelope, ok } from "../server/http/envelope";
 import { HttpError } from "../server/http/errors";
 import { requestContext, structuredError } from "../server/http/security";
-import type { AppEnv } from "../server/http/types";
+import { applicationBindings, type AppEnv } from "../server/http/types";
+import {
+  PRIVATE_OBJECT_MAX_BYTES,
+  PRIVATE_OBJECT_TOTAL_BUDGET_BYTES,
+} from "../server/storage/private-object-store";
 import { appRoutes } from "../server/routes/app";
 import { archiveServiceRoutes } from "../server/routes/service-archive";
 import { authRoutes } from "../server/routes/auth";
@@ -33,6 +37,9 @@ app.get("/api/v1/health", async (context) => {
     status: "healthy" as const,
     database: "available" as const,
     files: "configured" as const,
+    fileStorage: "workers_kv_free" as const,
+    maximumFileBytes: PRIVATE_OBJECT_MAX_BYTES,
+    storageBudgetBytes: PRIVATE_OBJECT_TOTAL_BUDGET_BYTES,
     archive: "configured" as const,
   });
 });
@@ -105,6 +112,12 @@ app.onError((error, context) => {
   );
 });
 
-export default app;
+const worker: ExportedHandler<CloudflareBindings> = {
+  fetch(request, bindings, executionContext) {
+    return app.fetch(request, applicationBindings(bindings), executionContext);
+  },
+};
+
+export default worker;
 export { ArchiveWorkflow } from "./archive-workflow";
 export { ProjectCollaborationHub } from "./project-collaboration-hub";

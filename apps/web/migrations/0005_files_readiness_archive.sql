@@ -1,5 +1,5 @@
 -- Private file/version metadata, readiness evaluation/snapshots, exports, and
--- outbound-only NAS archive job state. Binary bodies remain in private R2.
+-- outbound-only NAS archive job state. Binary bodies remain in private object storage.
 
 PRAGMA foreign_keys = ON;
 

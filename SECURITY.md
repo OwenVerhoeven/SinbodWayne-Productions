@@ -2,7 +2,7 @@
 
 ## System and scope
 
-Sinbod Wayne Productions is a private pre-production workspace deployed as a Cloudflare Worker application with relational metadata in D1, private objects in R2, durable export/archive orchestration, a limited collaboration channel, and an outbound-only NAS archive agent.
+Sinbod Wayne Productions is a private pre-production workspace deployed as a Cloudflare Worker application with relational metadata in D1, private immutable objects in Workers KV, durable export/archive orchestration, a limited collaboration channel, and an outbound-only NAS archive agent whose production connection is a later optional operational step.
 
 Repository-wide security review covers:
 
@@ -22,7 +22,7 @@ Important boundaries are:
 
 - anonymous internet to login, narrow public links, and provider endpoints;
 - authenticated browser to Worker API across cookie/CSRF and object authorization;
-- Worker to D1/R2/Durable Objects/Workflows and provider adapters;
+- Worker to D1/Workers KV/Durable Objects/Workflows and provider adapters;
 - public/share/recipient contexts to the authenticated project context;
 - one workspace/project/object/field scope to another;
 - mutable drafts to immutable revisions, issues, approvals, file versions, exports, and archive receipts;
@@ -42,7 +42,7 @@ These properties must hold regardless of UI state:
 5. Cookie-authenticated mutation requires a valid session plus same-origin and CSRF controls. Session rotation/revocation and credential changes invalidate access as documented.
 6. Tenant/project ownership is validated centrally for direct identifiers and common typed object references. A caller cannot supply ownership columns that bypass the resolved parent.
 7. Parameterized SQL and boundary schemas constrain every request/import/provider payload. Rich text and annotations are sanitized before rendering.
-8. R2 is private. Upload/download authority is operation-, workspace-, project-, key-, type-, size-, and expiry-scoped. Completion requires object and integrity evidence before a version becomes available.
+8. Workers KV is private behind the Worker. Upload/download authority is operation-, workspace-, project-, key-, type-, size-, and expiry-scoped. The immutable adapter calculates and validates size, MIME evidence, and SHA-256 before a version becomes available; namespace credentials never reach the browser.
 9. Mutable records use optimistic concurrency. A stale write never silently overwrites either user's work.
 10. Script revisions, scene sync records, approval decisions, issued artifacts, file versions, readiness issues, export snapshots, archive manifests, and audit events are append-only. Corrections supersede.
 11. `scene_id`, not scene number or slugline, anchors downstream production work. Ambiguous mappings and removed scenes with linked work require explicit decisions and transactional apply.
@@ -83,5 +83,9 @@ Accepted risk, explicitly confirmed by the owner: bootstrap credentials are usab
 - Character-level CRDT collaboration is not claimed. D1 optimistic concurrency, draft preservation, invalidation/polling, and explicit conflict review are the required controls.
 - Browser print/Save as PDF is the mandatory deterministic document path when server PDF rendering is absent.
 - FTS is a derived index; backup/restore procedures must rebuild and verify it rather than treating it as canonical data.
+- The current no-subscription Workers KV profile is intentionally bounded to 25 MiB per object, 1 GB (`1000000000` bytes) total planned storage, and 1,000 writes per day, with no multipart uploads. Capacity rejection must be explicit and must occur before bytes or metadata are committed.
+- Workers KV propagation is eventually consistent. Recent writes may produce a bounded retriable state; authorization, retention tombstones, immutable D1 pins, and checksum verification remain authoritative while propagation settles.
+- R2 is an optional future storage-adapter migration, not a current binding or security dependency. A future migration requires a new review of consistency, credentials, capacity, backups, and cutover evidence.
+- The NAS agent is implemented and tested locally, but no production NAS credential, host, mount, or destination is claimed until a later operator provisions and verifies them.
 
 Report security concerns privately to the Sinbod Wayne workspace owner. Do not include production data, credentials, signed links, or unnecessary personal information in a report or proof of concept.

@@ -2,12 +2,17 @@ import { timingSafeHexEqual } from "./crypto";
 import { ArchiveServiceError } from "./errors";
 import { resolveArchiveByteRange } from "./range";
 import type { ArchiveContentDescriptor, ArchiveDownload } from "./types";
+import type {
+  PrivateObject,
+  PrivateObjectBody,
+  PrivateObjectStore,
+} from "../storage/private-object-store";
 
 function bytesToHex(value: ArrayBuffer): string {
   return [...new Uint8Array(value)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function objectSha256(object: R2Object): string | null {
+function objectSha256(object: PrivateObject): string | null {
   if (object.checksums.sha256 !== undefined) return bytesToHex(object.checksums.sha256);
   const metadataDigest = object.customMetadata?.sha256;
   return metadataDigest && /^[a-f0-9]{64}$/u.test(metadataDigest) ? metadataDigest : null;
@@ -18,18 +23,18 @@ function basename(relativePath: string): string {
   return segment.replaceAll(/[^A-Za-z0-9._-]/gu, "_").slice(0, 160) || "archive-item";
 }
 
-function isObjectBody(object: R2Object): object is R2ObjectBody {
+function isObjectBody(object: PrivateObject): object is PrivateObjectBody {
   return Reflect.has(object, "body");
 }
 
-export class R2ArchiveStorage {
-  readonly bucket: R2Bucket;
+export class PrivateArchiveStorage {
+  readonly bucket: PrivateObjectStore;
 
-  constructor(bucket: R2Bucket) {
+  constructor(bucket: PrivateObjectStore) {
     this.bucket = bucket;
   }
 
-  async assertImmutableObject(descriptor: ArchiveContentDescriptor): Promise<R2Object> {
+  async assertImmutableObject(descriptor: ArchiveContentDescriptor): Promise<PrivateObject> {
     const object = await this.bucket.head(descriptor.objectKey);
     if (object === null) {
       throw new ArchiveServiceError("INTEGRITY_FAILURE", "An archive source object is missing.");

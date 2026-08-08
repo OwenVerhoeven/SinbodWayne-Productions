@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { HttpError } from "../http/errors";
 import {
+  SINGLE_UPLOAD_MAX_BYTES,
   assertFileSignature,
   assertStoredObject,
   assertUploadIntent,
@@ -27,6 +28,21 @@ describe("private file upload policy", () => {
     expect(() =>
       assertUploadIntent({ ...validIntent, sha256: "not-a-digest" }, 10_000),
     ).toThrowError(HttpError);
+  });
+
+  it("enforces the Workers KV 25 MiB value ceiling", () => {
+    expect(() =>
+      assertUploadIntent(
+        { ...validIntent, byteSize: SINGLE_UPLOAD_MAX_BYTES },
+        SINGLE_UPLOAD_MAX_BYTES,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertUploadIntent(
+        { ...validIntent, byteSize: SINGLE_UPLOAD_MAX_BYTES + 1 },
+        SINGLE_UPLOAD_MAX_BYTES,
+      ),
+    ).toThrowError(/26214400/u);
   });
 
   it("rejects stored evidence with a changed checksum or tenant scope", () => {

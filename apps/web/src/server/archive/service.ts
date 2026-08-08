@@ -1,6 +1,6 @@
 import type { ArchiveRepository } from "./repository";
 import { D1ArchiveRepository } from "./repository";
-import { R2ArchiveStorage } from "./storage";
+import { PrivateArchiveStorage } from "./storage";
 import type {
   ArchiveDownload,
   ArchiveLeaseContract,
@@ -10,6 +10,7 @@ import type {
   LeaseRequest,
   ManifestAcknowledgementInput,
 } from "./types";
+import type { ApplicationBindings } from "../http/types";
 
 export interface ArchiveCoordinatorContract {
   authenticate(rawToken: string, now: number): Promise<ArchiveServicePrincipal>;
@@ -70,17 +71,17 @@ export interface ArchiveCoordinatorContract {
 
 export class ArchiveCoordinator implements ArchiveCoordinatorContract {
   readonly repository: ArchiveRepository;
-  readonly storage: R2ArchiveStorage;
+  readonly storage: PrivateArchiveStorage;
 
-  constructor(repository: ArchiveRepository, storage: R2ArchiveStorage) {
+  constructor(repository: ArchiveRepository, storage: PrivateArchiveStorage) {
     this.repository = repository;
     this.storage = storage;
   }
 
-  static fromBindings(bindings: Pick<CloudflareBindings, "DB" | "FILES">): ArchiveCoordinator {
+  static fromBindings(bindings: Pick<ApplicationBindings, "DB" | "FILES">): ArchiveCoordinator {
     return new ArchiveCoordinator(
       new D1ArchiveRepository(bindings.DB),
-      new R2ArchiveStorage(bindings.FILES),
+      new PrivateArchiveStorage(bindings.FILES),
     );
   }
 

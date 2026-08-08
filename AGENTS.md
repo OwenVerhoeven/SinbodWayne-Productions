@@ -4,7 +4,7 @@ This repository contains **Sinbod Wayne Productions**, an internal pre-productio
 
 ## Product boundary
 
-- Implement the complete path from idea capture through verified Ready to Shoot, including development, writing, breakdown, visual planning, production planning, scheduling, call sheets, production packs, exports, and NAS archival.
+- Implement the complete path from idea capture through verified Ready to Shoot, including development, writing, breakdown, visual planning, production planning, scheduling, call sheets, production packs, and complete cloud exports. The outbound NAS protocol remains implemented and tested, but production NAS provisioning is a later optional operational step.
 - Do not add production-day execution or post-production workflow. Lifecycle labels may include later phases, but they are not license to build placeholder modules.
 - Required features must persist real data and enforce policy at the server. No decorative actions, fake delivery/signature/scan/archive claims, hard-coded dashboard counts, or “coming soon” routes.
 - When a provider is absent, show `Not configured` and keep the documented manual fallback useful.
@@ -50,7 +50,10 @@ If a script is not yet available during initial construction, add it before clai
 - Mutable records carry an optimistic-concurrency version. A stale write returns a recoverable conflict and never silently overwrites.
 - Revisions, issued artifacts, decisions, audit events, and file versions are immutable. Corrections supersede.
 - Use association tables where ownership and referential integrity matter. Bounded JSON is for deliberate snapshots or editor fragments, not a live-project dumping ground.
-- Keep binary content in private R2. D1 stores metadata, relations, integrity values, and version pins.
+- The current no-subscription deploy/test profile keeps private byte objects in Workers KV behind the `PrivateObjectStore` adapter. D1 stores metadata, relations, integrity values, quotas, and version pins.
+- Enforce the current Workers KV profile at every entry point: at most 25 MiB per object, 1 GB (`1000000000` bytes) total planned storage, and 1,000 writes per day. There is no multipart upload path.
+- Workers KV is eventually consistent. A just-written object that is temporarily unavailable is a retriable propagation state, not immediate evidence of corruption or deletion.
+- R2 remains an optional future capacity backend behind the same adapter. Do not introduce R2-specific assumptions into domain, route, archive, or NAS contracts.
 - Use parameterized queries. List endpoints use cursor pagination and avoid N+1 access.
 - Retry-sensitive operations require an idempotency key and an idempotent implementation.
 
@@ -62,7 +65,7 @@ If a script is not yet available during initial construction, add it before clai
 - Enforce authentication, workspace/project membership, object ownership, action permission, and sensitive-field access in the Worker. A hidden UI control is not authorization.
 - Cookie-authenticated mutations require same-origin and CSRF defenses. Public-share, recipient, service-agent, and provider-webhook routes use separate authentication contexts.
 - Store only hashes of session, share, service, and one-time bootstrap credentials. Compare secrets in a timing-safe manner where supported.
-- R2 is private. Downloads are short-lived and scoped, or streamed through an authorized Worker route with safe headers.
+- Workers KV has no public object endpoint in this profile. Downloads are streamed only through an authorized Worker route with safe headers; namespace credentials and bindings never reach the browser.
 - Sanitize rich text and annotation inputs. Validate upload type, size, signature, destination, and completion evidence.
 - Audit permission changes, sensitive exports, links, approvals, issues, archive actions, retention actions, and destructive operations.
 - Do not weaken tests to accommodate a structural failure. Consult `SECURITY.md` and `docs/threat-model.md` for review criteria.

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -156,7 +157,7 @@ export async function applyLocalMigrations(persistTo: string): Promise<void> {
   }
 }
 
-export async function putLocalR2Object(
+export async function putLocalKvObject(
   objectKey: string,
   content: Uint8Array,
   contentType: string,
@@ -167,55 +168,78 @@ export async function putLocalR2Object(
     objectKey.includes("\\") ||
     objectKey.split("/").some((part) => part === "..")
   ) {
-    throw new Error("Refusing an unsafe local R2 object key.");
+    throw new Error("Refusing an unsafe local KV object key.");
   }
-  const result = await runWrangler(
-    [
-      "r2",
-      "object",
+  if (content.byteLength > 25 * 1024 * 1024)
+    throw new Error("Local KV fixture objects may not exceed 25 MiB.");
+  const prefix = "swp-kv-object-";
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  const objectPath = join(directory, "object.bin");
+  const sha256 = createHash("sha256").update(content).digest("hex");
+  const metadata = JSON.stringify({
+    schemaVersion: 1,
+    byteSize: content.byteLength,
+    contentType,
+    cacheControl: "private, no-store",
+    sha256,
+    etag: sha256,
+    uploadedAt: Date.now(),
+    customMetadata: { sha256, immutable: "true", product: "sinbod-wayne-productions" },
+  });
+  try {
+    await writeFile(objectPath, content, { flag: "wx", mode: 0o600 });
+    if (process.platform !== "win32") await chmod(objectPath, 0o600);
+    const result = await runWrangler([
+      "kv",
+      "key",
       "put",
-      `sinbod-wayne-productions-files/${objectKey}`,
+      objectKey,
+      "--binding",
+      "FILE_OBJECTS",
+      "--path",
+      objectPath,
+      "--metadata",
+      metadata,
       "--local",
       "--persist-to",
       resolve(persistTo),
       "--config",
       wranglerConfigPath,
-      "--content-type",
-      contentType,
-      "--pipe",
-      "--force",
-    ],
-    { stdin: content },
-  );
-  if (result.exitCode !== 0)
-    throw new Error(`Local R2 fixture upload failed (Wrangler exit ${result.exitCode}).`);
+    ]);
+    if (result.exitCode !== 0)
+      throw new Error(`Local KV fixture upload failed (Wrangler exit ${result.exitCode}).`);
+  } finally {
+    assertTemporaryDirectory(directory, prefix);
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
-export async function getLocalR2Object(objectKey: string, persistTo: string): Promise<Uint8Array> {
+export async function getLocalKvObject(objectKey: string, persistTo: string): Promise<Uint8Array> {
   if (
     objectKey.startsWith("/") ||
     objectKey.includes("\\") ||
     objectKey.split("/").some((part) => part === "..")
   ) {
-    throw new Error("Refusing an unsafe local R2 object key.");
+    throw new Error("Refusing an unsafe local KV object key.");
   }
   const result = await runWrangler(
     [
-      "r2",
-      "object",
+      "kv",
+      "key",
       "get",
-      `sinbod-wayne-productions-files/${objectKey}`,
+      objectKey,
+      "--binding",
+      "FILE_OBJECTS",
       "--local",
       "--persist-to",
       resolve(persistTo),
       "--config",
       wranglerConfigPath,
-      "--pipe",
     ],
     { captureStdout: true },
   );
   if (result.exitCode !== 0)
-    throw new Error(`Local R2 fixture verification failed (Wrangler exit ${result.exitCode}).`);
+    throw new Error(`Local KV fixture verification failed (Wrangler exit ${result.exitCode}).`);
   return result.stdout;
 }
 
@@ -223,7 +247,13 @@ export async function assertRemoteDatabaseConfigured(): Promise<void> {
   const config = await readFile(wranglerConfigPath, "utf8");
   const id = /"database_id"\s*:\s*"([^"]+)"/u.exec(config)?.[1];
   if (id === undefined || id === "00000000-0000-0000-0000-000000000000") {
-    throw new Error("Production D1 is not configured; refusing remote bootstrap.");
+    throw new Error("Production D1 is not configured; refusing the production action.");
+  }
+  const kvId = /"kv_namespaces"[\s\S]*?"id"\s*:\s*"([^"]+)"/u.exec(config)?.[1];
+  if (kvId === undefined || kvId === "00000000000000000000000000000000") {
+    throw new Error(
+      "Production Workers KV storage is not configured; refusing the production action.",
+    );
   }
 }
 

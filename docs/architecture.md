@@ -13,13 +13,13 @@ flowchart LR
   subgraph Clients
     B[Authenticated browser/PWA]
     P[Public recipient, candidate, or approver]
-    N[NAS agent]
+    N[NAS agent - later production rollout]
   end
 
   subgraph Cloudflare
     W[Worker: static assets + Hono API]
     D[(D1 relational source of truth)]
-    R[(Private R2 files and snapshots)]
+    K[(Private Workers KV objects)]
     O[Project collaboration Durable Object]
     F[Export/archive Workflows]
   end
@@ -33,15 +33,15 @@ flowchart LR
   P -->|narrow exchanged link context| W
   N -->|least-privilege lease and acknowledgements| W
   W --> D
-  W --> R
+  W --> K
   W --> O
   W --> F
   F --> D
-  F --> R
+  F --> K
   W -. evidence-based adapter .-> E
   W -. evidence-based adapter .-> H
   O -. invalidation/presence only .-> B
-  R -->|scoped archive object reads| N
+  K -.->|scoped archive object reads when configured| N
   N --> NAS[(Private NAS mount)]
 ```
 
@@ -89,21 +89,23 @@ Success envelopes carry `data`, `requestId`, and optional page metadata. Errors 
 
 ### D1
 
-D1 is authoritative for relational state, memberships, current pointers, idempotency, workflow metadata, version pins, checksums, and audit. Foreign keys are enabled. Migrations are ordered and checked in. Association tables enforce meaningful relationships instead of allowing arbitrary polymorphic blobs.
+D1 is authoritative for relational state, memberships, current pointers, idempotency, workflow metadata, version pins, checksums, private-object quota state, retention tombstones, and audit. Foreign keys are enabled. Migrations are ordered and checked in. Association tables enforce meaningful relationships instead of allowing arbitrary polymorphic blobs.
 
 Mutable records include an integer optimistic version. A transaction/batch first asserts the expected version through a failure-producing database guard, then writes related records and increments the version. This prevents a zero-row update from allowing the rest of a batch to commit.
 
 Immutable tables use database guards as defense in depth plus API-only creation. Restoring history creates a new revision/head transition; it does not edit old rows.
 
-### R2
+### Private object storage
 
-R2 remains private and has no public listing. It stores binary file versions, safe previews, immutable issue/report/export bodies, ZIP output, and archive objects. D1 records logical names, object keys, sizes, media types, integrity values, uploader/provenance, retention/scan state, and pins.
+The current no-subscription deploy/test profile binds a private Workers KV namespace as `FILE_OBJECTS` and wraps it in the storage-neutral `PrivateObjectStore`. It stores immutable file versions, safe previews, bounded issue/report/export bodies, and archive objects. D1 records logical names, object keys, sizes, media types, integrity values, uploader/provenance, quota, retention/scan state, and pins. The namespace has no public object route and no binding or credential is exposed to the browser.
 
-The preferred transfer path streams through an authorized Worker request to avoid exposing credentials. Larger uploads use scoped multipart state and bounded parts. Completion verifies object existence and metadata, validates file type/signature/size, computes or verifies integrity according to the transfer path, and only then marks the immutable version usable. Malware scanning is an adapter seam; absent configuration is visible.
+This profile enforces 25 MiB per object, 1 GB (`1000000000` bytes) total planned private-object storage, and 1,000 writes per day. Uploads use one bounded request; multipart is not implemented or claimed. The adapter buffers at most one bounded object, calculates SHA-256, validates declared integrity and file evidence, writes compact metadata, and only then marks the immutable version usable. Malware scanning is an adapter seam; absent configuration is visible.
+
+Workers KV is eventually consistent. An immediate post-write miss is returned as a retriable propagation state, never silently treated as deletion or corruption. Unique immutable keys, D1 version pins, adapter integrity checks, and authorized Worker downloads contain last-write and stale-read risk. R2 remains an optional future capacity backend behind the same adapter; it is not a current deployment dependency.
 
 ### Workflows
 
-Cloudflare Workflows coordinate durable, retryable export and archive preparation. Every step stores large payloads by R2/D1 reference, carries an idempotency identity, and advances an explicit monotonic job state with attempt timestamps, lease/heartbeat information, and actionable redacted error details. Workflow retries cannot mutate an already issued snapshot.
+Cloudflare Workflows coordinate durable, retryable export and archive preparation. Every step stores bounded payloads by private-object/D1 reference, carries an idempotency identity, and advances an explicit monotonic job state with attempt timestamps, lease/heartbeat information, and actionable redacted error details. Larger logical exports are deterministic manifests over multiple objects below the KV value ceiling. Workflow retries cannot mutate an already issued snapshot.
 
 ### Collaboration Durable Object
 
@@ -111,7 +113,7 @@ One project-scoped Durable Object coordinates ephemeral presence and ordered inv
 
 ### NAS agent
 
-The archive agent is a Node TypeScript CLI/service running on a maintained host with a configured NAS mount. It opens outbound HTTPS only. Its service identity can lease eligible jobs, fetch scoped object access, heartbeat, and acknowledge items/manifests; it cannot act as a user or delete cloud data.
+The archive agent is a Node TypeScript CLI/service designed to run on a maintained host with a configured NAS mount. Its code and protocol are implemented and locally verified; production host, mount, destination, and service credential provisioning are a later optional operational rollout and are not implied by initial cloud deployment. When configured, it opens outbound HTTPS only. Its service identity can lease eligible jobs, fetch scoped object access, heartbeat, and acknowledge items/manifests; it cannot act as a user or delete cloud data.
 
 The agent validates a literal destination root, checks safe relative paths and parent components, stages one job, checks space where the host supports it, resumes by byte range, verifies every size/integrity value, flushes durable writes when available, then promotes the complete verified staging tree atomically where the filesystem permits. It never logs credentials or signed access.
 
@@ -172,7 +174,7 @@ Common services own:
 
 ## Immutable artifacts and staleness
 
-Issuance captures canonical structured content or a pointer to a canonical R2 snapshot, exact source revision/file-version IDs, permission-filtered recipient content, an integrity manifest, author/time, and an idempotency identity. An update cannot target an issued row. A correction creates a new issue with `supersedes_id`.
+Issuance captures canonical structured content or a pointer to a canonical private-object snapshot, exact source revision/file-version IDs, permission-filtered recipient content, an integrity manifest, author/time, and an idempotency identity. An update cannot target an issued row. A correction creates a new issue with `supersedes_id`.
 
 Readiness and other stale-aware artifacts record dependency fingerprints. A relevant source mutation appends a change event that compares against active issue dependencies and records precise stale reasons. Staleness never mutates the frozen issue body; it changes a separate current-state projection.
 
@@ -196,7 +198,7 @@ Provider webhooks authenticate, validate, deduplicate, bind to a known operation
 
 Potentially large lists use stable cursor pagination, intentional indexes and batch preloading. Dense tables virtualize client rendering but preserve accessible alternatives. Search is permission-filtered; a derived D1 FTS index may accelerate permitted candidates, but canonical rows are rechecked before serialization. Restore rebuilds FTS and verifies counts because virtual tables are not the canonical backup source.
 
-Report previews query bounded, pinned data. Large generated bodies stream to R2 rather than buffering through workflow state. Print routes use deterministic ordering, explicit paper/orientation, stable fonts/assets, page-break rules and recipient field filtering.
+Report previews query bounded, pinned data. Generated byte bodies are limited to 25 MiB each in the current KV profile; larger logical exports are split into deterministic manifest entries rather than buffered in workflow state as one oversized value. Print routes use deterministic ordering, explicit paper/orientation, stable fonts/assets, page-break rules and recipient field filtering.
 
 ## Reliability and recovery
 
@@ -204,9 +206,11 @@ Report previews query bounded, pinned data. Large generated bodies stream to R2 
 - No automated process deletes the only known good copy.
 - Current pointers are repaired from immutable version history if needed; history is not erased.
 - Jobs expose lease, heartbeat, attempts and actionable errors; expired leases can be safely reclaimed.
-- Backup/restore includes D1 export, private R2 version manifest, secrets/binding inventory (without values), FTS rebuild, checksum verification and smoke tests.
+- Backup/restore includes D1 export, private KV object/version manifest and copies, secrets/binding inventory (without values), FTS rebuild, checksum verification and smoke tests.
 - Deployment and rollback operate only on verified unique resources and the approved production subdomain.
 
 ## Future attachment points
 
 Future production execution may attach take/timecard/report/continuity records to `project_id`, `shoot_day_id`, `scene_id`, `shot_id`, `person_id`, `equipment_id`, and immutable source issue IDs. Post-production may attach media/editorial/deliverable graphs to those identities and file versions. Neither future area may mutate pre-production revisions or issued Ready to Shoot history.
+
+A future owner-approved R2 migration may replace the KV adapter when capacity or transfer requirements exceed the no-subscription profile. It must preserve immutable object keys or a verified per-object mapping, D1 pins and checksums, authorization, legal holds, retention tombstones, export manifests, rollback evidence, and NAS protocol compatibility.
