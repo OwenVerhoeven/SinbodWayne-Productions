@@ -176,6 +176,14 @@ The command must:
 
 The owner accepted that the initial credentials remain usable until changed. First-login rotation is not forced. Password change and session revocation are verified during the smoke test.
 
+The free-tier production runtime also requires the `AUTH_PEPPER` Worker secret. Generate it with a cryptographically secure 32-byte source and provision it directly with `wrangler secret put AUTH_PEPPER`; never place its value in Git, a dashboard build variable, command arguments, or documentation. Owner recovery is then:
+
+```text
+npm run recover-owner:remote
+```
+
+The recovery CLI takes the password only through hidden input. For production it stores only a five-minute challenge digest in D1 and sends the credential over HTTPS to the one-time Worker recovery route, so derivation occurs in the exact runtime that verifies login. The transaction rotates the credential, consumes the challenge, revokes sessions, and writes an audit event. A failed or expired operation cannot be reused.
+
 ## Deploy
 
 The intended reviewed root command is:
@@ -199,7 +207,7 @@ For a Cloudflare Git-connected Worker build, enter these exact dashboard values:
 | Deploy command       | `npx --yes npm@11 run deploy`                                                                                                  |
 | Environment variable | `NODE_VERSION` = `24`                                                                                                          |
 
-Do not add application secrets or bootstrap credentials to the Git build environment. This deployment profile needs no app secret variables; Cloudflare's Git integration supplies its own platform deployment authority. Optional provider and later NAS credentials remain `Not configured` until separately approved and provisioned through their protected runtime mechanisms.
+Do not add application secrets or bootstrap credentials to the Git build environment. `AUTH_PEPPER` is provisioned separately as a Worker secret and persists across Git deployments; its value must never be a Git build variable. Cloudflare's Git integration supplies only its platform deployment authority. Optional provider and later NAS credentials remain `Not configured` until separately approved and provisioned through their protected runtime mechanisms.
 
 Before connecting the production branch, commit reviewed non-secret D1 and KV IDs in `apps/web/wrangler.jsonc`. The deploy command invokes the `@swp/web` `predeploy` lifecycle, which runs `apps/web/scripts/deploy-preflight.ts` and fails if either all-zero D1/KV placeholder remains. The Git build must not bypass that preflight, synthesize IDs, or use a Filmcraft resource.
 

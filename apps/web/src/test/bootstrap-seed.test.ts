@@ -9,7 +9,7 @@ import {
   type BootstrapSnapshot,
 } from "../../scripts/lib/bootstrap";
 import { buildTestSeedSql, createTestSeedCredentials, fixtureId } from "../../scripts/lib/seed";
-import { verifyPassword } from "../server/auth/crypto";
+import { encodePassword, verifyPassword } from "../server/auth/crypto";
 
 const workspaceId = fixtureId("bootstrap-test-workspace");
 
@@ -82,6 +82,16 @@ describe("production account bootstrap helpers", () => {
     expect(sql.includes("INSERT OR IGNORE INTO password_credentials")).toBe(true);
     expect(sql.includes("current_password_credential_id IS NULL")).toBe(true);
   }, 20_000);
+
+  it("binds the free-tier production verifier to its secret pepper", async () => {
+    const password = "synthetic-short-pass";
+    const pepper = "synthetic-test-pepper-not-a-production-secret";
+    const encoded = await encodePassword(password, pepper);
+    expect(encoded.encodedHash).toContain("i=10000,p=1");
+    expect(await verifyPassword(password, encoded.encodedHash, pepper)).toBe(true);
+    expect(await verifyPassword(password, encoded.encodedHash)).toBe(false);
+    expect(await verifyPassword("wrong-password", encoded.encodedHash, pepper)).toBe(false);
+  });
 
   it("reports membership-only repair without requesting a replacement credential", () => {
     const snapshot = completeSnapshot();

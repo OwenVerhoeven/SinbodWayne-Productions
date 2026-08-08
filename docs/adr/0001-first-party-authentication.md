@@ -18,7 +18,7 @@ Implement case-sensitive first-party username/password authentication with:
 - an approved identity manifest containing only non-secret identity/role data;
 - a one-time, idempotent bootstrap CLI that gathers credentials through hidden interactive input, qualifies a pinned Worker-compatible KDF profile, provisions only missing approved identities, never resets an existing credential, and verifies the exact active-account invariant;
 - fail-closed production behavior if KDF qualification or the account invariant fails;
-- no credential pepper in the first release, avoiding an unproven extra recovery dependency; encoded verifier parameters remain per credential;
+- a random production pepper stored only as the `AUTH_PEPPER` Worker secret, combined with per-credential random salts and recorded PBKDF2 parameters; the secret is provisioned outside Git and is required for production verification/recovery;
 - generic login behavior with equivalent verification work for unknown usernames, bounded backoff and edge/application rate controls;
 - random session credentials stored only as digests, secure host-only HTTP-only strict-same-site production cookie, idle and absolute expiry, authentication epoch, rotation, listing and revocation;
 - per-session CSRF proof kept in browser memory plus exact-origin, Fetch Metadata and content-type validation for cookie mutations;
@@ -27,7 +27,7 @@ Implement case-sensitive first-party username/password authentication with:
 - separate authentication contexts for app users, public/share recipients, service agents and providers;
 - server-side owner/producer policy for every request and sensitive field.
 
-The KDF selection order is tested against the exact pinned Worker runtime. A native memory-hard option is preferred; a Worker-compatible memory-hard alternative is next; a high-work-factor WebCrypto fallback is permitted only after deterministic qualification. The chosen profile is recorded without verifier material and does not change dynamically per login.
+The KDF selection order is tested against the exact pinned Worker runtime. A native memory-hard option is preferred; a Worker-compatible memory-hard alternative is next. The no-subscription Worker profile uses a pepper-bound PBKDF2-SHA-256 fallback with bounded runtime cost because Free-plan HTTP requests have a materially smaller CPU budget than local/test execution. Its parameters are encoded per credential, and rate limiting/backoff remain mandatory. Raising the work factor or migrating to a memory-hard profile requires runtime qualification and credential rotation.
 
 No forced first-login change flag is set. The UI still provides credential change, device/session review and revocation.
 

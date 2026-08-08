@@ -132,7 +132,7 @@ The agent validates a literal destination root, checks safe relative paths and p
 
 ## Authentication architecture
 
-The production bootstrap CLI reads credentials using hidden interactive input, performs deterministic KDF qualification for the pinned Worker runtime, and sends only verifier material through a one-time protected path. Bootstrap creates missing approved identities, does not reset existing credentials, and verifies the exact active-account manifest.
+The production bootstrap CLI reads credentials using hidden interactive input and verifies the exact active-account manifest. Free-tier production recovery derives replacement verifier material inside the pinned Worker runtime through a five-minute, hash-at-rest, one-time challenge. The Worker binds each salted PBKDF2 verifier to the separately provisioned `AUTH_PEPPER` secret, consumes recovery atomically, revokes sessions, and audits the operation. Credential values and the pepper never pass through repository/configuration files or command arguments.
 
 Login performs equivalent work for known and unknown usernames, uses bounded backoff and edge rate controls, and returns generic errors. Session credentials are random and only their digest is stored. The production session cookie is host-only, secure, HTTP-only, strict same-site and path scoped. Sessions have idle and absolute expiry and an authentication epoch; password/privilege change rotates authority and revokes other sessions.
 

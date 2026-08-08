@@ -1,9 +1,8 @@
 import { HttpError } from "../http/errors";
-import { Buffer } from "node:buffer";
-import { timingSafeEqual } from "node:crypto";
 
 const KDF_NAME = "pbkdf2-sha256";
 const KDF_ITERATIONS = 600_000;
+const PEPPERED_KDF_ITERATIONS = 10_000;
 const HASH_BYTES = 32;
 const SALT_BYTES = 16;
 const encoder = new TextEncoder();
@@ -15,6 +14,15 @@ const commonPasswords = new Set([
   "welcome123",
   "admin123",
 ]);
+
+function fixedLengthEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  let difference = 0;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    difference |= left[index]! ^ right[index]!;
+  }
+  return difference === 0;
+}
 
 function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
@@ -52,10 +60,24 @@ async function derive(
   password: string,
   salt: Uint8Array,
   iterations = KDF_ITERATIONS,
+  pepper?: string,
 ): Promise<Uint8Array> {
+  let passwordMaterial = encoder.encode(password);
+  if (pepper !== undefined) {
+    const pepperKey = await crypto.subtle.importKey(
+      "raw",
+      asArrayBuffer(encoder.encode(pepper)),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    passwordMaterial = new Uint8Array(
+      await crypto.subtle.sign("HMAC", pepperKey, asArrayBuffer(passwordMaterial)),
+    );
+  }
   const key = await crypto.subtle.importKey(
     "raw",
-    asArrayBuffer(encoder.encode(password)),
+    asArrayBuffer(passwordMaterial),
     "PBKDF2",
     false,
     ["deriveBits"],
@@ -70,48 +92,72 @@ async function derive(
 
 export async function encodePassword(
   password: string,
+  pepper?: string,
 ): Promise<{ encodedHash: string; kdf: string; parameters: string }> {
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
-  const hash = await derive(password, salt);
+  const iterations = pepper === undefined ? KDF_ITERATIONS : PEPPERED_KDF_ITERATIONS;
+  const hash = await derive(password, salt, iterations, pepper);
   return {
-    encodedHash: `${KDF_NAME}$i=${KDF_ITERATIONS}$${base64UrlEncode(salt)}$${base64UrlEncode(hash)}`,
+    encodedHash: `${KDF_NAME}$i=${iterations}${pepper === undefined ? "" : ",p=1"}$${base64UrlEncode(salt)}$${base64UrlEncode(hash)}`,
     kdf: KDF_NAME,
     parameters: JSON.stringify({
-      iterations: KDF_ITERATIONS,
+      iterations,
       hash: "SHA-256",
       saltBytes: SALT_BYTES,
       outputBytes: HASH_BYTES,
+      peppered: pepper !== undefined,
     }),
   };
 }
 
-export async function verifyPassword(password: string, encodedHash: string): Promise<boolean> {
+export async function verifyPassword(
+  password: string,
+  encodedHash: string,
+  pepper?: string,
+): Promise<boolean> {
   const parts = encodedHash.split("$");
   if (parts.length !== 4 || parts[0] !== KDF_NAME || !parts[1]?.startsWith("i=")) return false;
-  const iterations = Number(parts[1].slice(2));
+  const parameters = new Map(
+    parts[1]
+      .split(",")
+      .map((parameter) => parameter.split("=", 2))
+      .filter((parameter): parameter is [string, string] => parameter.length === 2),
+  );
+  const iterations = Number(parameters.get("i"));
+  const peppered = parameters.get("p") === "1";
   if (
     !Number.isSafeInteger(iterations) ||
-    iterations < 100_000 ||
+    iterations < (peppered ? PEPPERED_KDF_ITERATIONS : 100_000) ||
     iterations > 2_000_000 ||
+    (peppered && pepper === undefined) ||
     !parts[2] ||
     !parts[3]
   )
     return false;
   try {
     const expected = base64UrlDecode(parts[3]);
-    const actual = await derive(password, base64UrlDecode(parts[2]), iterations);
-    if (expected.byteLength !== actual.byteLength) return false;
-    return timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
+    const actual = await derive(
+      password,
+      base64UrlDecode(parts[2]),
+      iterations,
+      peppered ? pepper : undefined,
+    );
+    return fixedLengthEqual(expected, actual);
   } catch {
     return false;
   }
 }
 
-export async function performDummyPasswordWork(password: string): Promise<void> {
+export async function performDummyPasswordWork(password: string, pepper?: string): Promise<void> {
   const salt = encoder.encode("swp-unknown-user").slice(0, SALT_BYTES);
-  const actual = await derive(password, salt);
+  const actual = await derive(
+    password,
+    salt,
+    pepper === undefined ? KDF_ITERATIONS : PEPPERED_KDF_ITERATIONS,
+    pepper,
+  );
   const expected = new Uint8Array(HASH_BYTES);
-  timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
+  fixedLengthEqual(actual, expected);
 }
 
 export function validateNewPassword(password: string, username: string): void {
@@ -128,8 +174,5 @@ export function validateNewPassword(password: string, username: string): void {
 
 export async function safeEqual(left: string, right: string): Promise<boolean> {
   const [leftHash, rightHash] = await Promise.all([sha256(left), sha256(right)]);
-  return timingSafeEqual(
-    Buffer.from(base64UrlDecode(leftHash)),
-    Buffer.from(base64UrlDecode(rightHash)),
-  );
+  return fixedLengthEqual(base64UrlDecode(leftHash), base64UrlDecode(rightHash));
 }

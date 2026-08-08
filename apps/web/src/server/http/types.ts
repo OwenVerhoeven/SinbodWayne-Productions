@@ -17,12 +17,15 @@ export interface ActorContext {
 export type ApplicationBindings = Omit<CloudflareBindings, "FILE_OBJECTS"> & {
   readonly FILE_OBJECTS: KVNamespace;
   readonly FILES: PrivateObjectStore;
+  readonly AUTH_PEPPER: string | undefined;
 };
 
 export function applicationBindings(bindings: CloudflareBindings): ApplicationBindings {
+  const runtimeBindings = bindings as CloudflareBindings & { readonly AUTH_PEPPER?: string };
   return {
     ...bindings,
     FILES: new KvPrivateObjectStore(bindings.FILE_OBJECTS),
+    AUTH_PEPPER: runtimeBindings.AUTH_PEPPER,
   };
 }
 

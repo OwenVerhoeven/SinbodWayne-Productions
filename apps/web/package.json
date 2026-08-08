@@ -17,6 +17,8 @@
     "db:migrate:remote": "wrangler d1 migrations apply sinbod-wayne-productions-db --remote",
     "bootstrap:local": "tsx scripts/bootstrap.ts --target local",
     "bootstrap:remote": "tsx scripts/bootstrap.ts --target production",
+    "recover-owner:local": "tsx scripts/recover-owner.ts --target local",
+    "recover-owner:remote": "tsx scripts/recover-owner.ts --target production",
     "seed": "npm run seed:test",
     "seed:test": "tsx scripts/seed.ts --target test",
     "seed:local": "tsx scripts/seed.ts --target local",
