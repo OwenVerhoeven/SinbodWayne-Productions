@@ -186,6 +186,19 @@ export function ScreenplayPage() {
     },
   });
 
+  const addBlock = useMutation({
+    mutationFn: (sceneId: string) =>
+      apiRequest(
+        `/api/v1/app/projects/${encodeURIComponent(projectId ?? "")}/screenplay/blocks`,
+        z.object({ created: z.literal(true), blockId: z.string() }),
+        { method: "POST", body: jsonBody({ sceneId, type: "action" }) },
+      ),
+    onSuccess: async () => {
+      setDirty(false);
+      await queryClient.invalidateQueries({ queryKey: ["screenplay", projectId] });
+    },
+  });
+
   const resolveMapping = useMutation({
     mutationFn: (input: {
       mappingId: string;
@@ -413,25 +426,27 @@ export function ScreenplayPage() {
             ) : null}
             <div className="script-page" role="document">
               {draftBlocks.length ? (
-                draftBlocks.map((block) => (
-                  <div className={`script-block script-block--${block.type}`} key={block.id}>
-                    <label>
-                      <span>{block.type.replaceAll("_", " ")}</span>
-                      <select
-                        aria-label={`Element type for ${block.text.slice(0, 30)}`}
-                        onChange={(event) =>
-                          updateBlock(block.id, {
-                            type: blockTypeSchema.parse(event.currentTarget.value),
-                          })
-                        }
-                        value={block.type}
-                      >
-                        {blockTypeSchema.options.map((option) => (
-                          <option key={option} value={option}>
-                            {option.replaceAll("_", " ")}
-                          </option>
-                        ))}
-                      </select>
+                <>
+                  {draftBlocks.map((block) => (
+                    <div className={`script-block script-block--${block.type}`} key={block.id}>
+                      <div className="script-block__controls">
+                        <span>{block.type.replaceAll("_", " ")}</span>
+                        <select
+                          aria-label={`Block type for ${block.text.slice(0, 30) || "empty block"}`}
+                          onChange={(event) =>
+                            updateBlock(block.id, {
+                              type: blockTypeSchema.parse(event.currentTarget.value),
+                            })
+                          }
+                          value={block.type}
+                        >
+                          {blockTypeSchema.options.map((option) => (
+                            <option key={option} value={option}>
+                              {option.replaceAll("_", " ")}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                       <textarea
                         aria-label={`${block.type.replaceAll("_", " ")} text`}
                         onChange={(event) =>
@@ -440,11 +455,31 @@ export function ScreenplayPage() {
                         rows={Math.max(1, Math.ceil(block.text.length / 72))}
                         value={block.text}
                       />
-                    </label>
+                    </div>
+                  ))}
+                  <div className="script-page__actions">
+                    <Button
+                      disabled={!selectedSceneId || addBlock.isPending || dirty}
+                      icon={<Plus />}
+                      onClick={() => selectedSceneId && addBlock.mutate(selectedSceneId)}
+                      variant="quiet"
+                    >
+                      {dirty ? "Save before adding a block" : "Add block"}
+                    </Button>
                   </div>
-                ))
+                </>
               ) : (
                 <SurfaceBoundary
+                  action={
+                    <Button
+                      disabled={addScene.isPending}
+                      icon={<Plus />}
+                      onClick={() => addScene.mutate()}
+                      variant="primary"
+                    >
+                      {addScene.isPending ? "Adding scene…" : "Add first scene"}
+                    </Button>
+                  }
                   description="Import a screenplay or add a structured scene block."
                   state="empty"
                   title="This scene is empty"

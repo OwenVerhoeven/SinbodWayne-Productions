@@ -989,6 +989,14 @@ textarea:focus {
   inset: 0;
   position: absolute;
 }
+.drawer-layer > .drawer-scrim {
+  z-index: 0;
+}
+.drawer-layer > .record-editor,
+.drawer-layer > .notification-drawer,
+.drawer-layer > .planning-dialog {
+  z-index: 1;
+}
 .form-dialog,
 .command-palette {
   background: var(--swp-surface-1);
@@ -1877,35 +1885,39 @@ textarea:focus {
   padding: 74px 72px;
   width: min(760px, calc(100% - 48px));
 }
-.script-block label {
-  display: block;
+.script-block {
   position: relative;
 }
-.script-block label > span {
+.script-block__controls {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  min-height: 28px;
+  opacity: 0.55;
+  transition: opacity var(--swp-ease);
+}
+.script-block:hover .script-block__controls,
+.script-block:focus-within .script-block__controls {
+  opacity: 1;
+}
+.script-block__controls > span {
   color: #747474;
   font:
     600 0.5rem/1 "Inter",
     sans-serif;
-  left: -57px;
-  opacity: 0;
-  position: absolute;
   text-transform: uppercase;
-  top: 8px;
-  transition: opacity var(--swp-ease);
 }
-.script-block:hover label > span,
-.script-block:focus-within label > span {
-  opacity: 1;
-}
-.script-block select {
-  appearance: none;
-  border: 0;
-  height: 1px;
-  min-height: 1px;
-  opacity: 0;
-  padding: 0;
-  position: absolute;
-  width: 1px;
+.script-block__controls select {
+  background: #e7e4da;
+  border: 1px solid #c7c1b5;
+  color: #303030;
+  font:
+    600 0.625rem/1 "Inter",
+    sans-serif;
+  min-height: 28px;
+  padding: 4px 24px 4px 7px;
+  width: auto;
 }
 .script-block textarea {
   background: transparent;
@@ -1946,6 +1958,13 @@ textarea:focus {
   text-align: right;
   text-transform: uppercase;
   width: 44%;
+}
+.script-page__actions {
+  border-top: 1px dashed #c7c1b5;
+  display: flex;
+  justify-content: center;
+  margin-top: 18px;
+  padding-top: 14px;
 }
 .conflict-banner,
 .stale-banner {
@@ -3419,7 +3438,7 @@ textarea:focus {
     border-top: 1px solid var(--swp-line);
     max-height: 560px;
   }
-  .screenplay-page .project-header__actions .swp-button span {
+  .screenplay-page .project-header__actions .swp-button > span:not(.swp-button__icon) {
     display: none;
   }
   .readiness-panel,
@@ -3696,7 +3715,7 @@ textarea:focus {
     width: 62%;
   }
   .save-state > span:nth-child(2),
-  .save-state .swp-button span {
+  .save-state .swp-button > span:not(.swp-button__icon) {
     display: none;
   }
   .readiness-summary {

@@ -45,6 +45,12 @@ const draftBlockSchema = z
   })
   .strict();
 const draftPatchSchema = z.object({ blocks: z.array(draftBlockSchema).min(1).max(2_000) }).strict();
+const createBlockSchema = z
+  .object({
+    sceneId: z.string().min(1).max(64),
+    type: z.enum(screenplayBlockTypes).default("action"),
+  })
+  .strict();
 const revisionSchema = z
   .object({
     name: z.string().trim().min(2).max(120),
@@ -291,6 +297,64 @@ screenplayRoutes.post("/scenes", async (context) => {
     ).bind(now, screenplay.id),
   ]);
   return ok(context, { created: true as const, sceneId }, 201);
+});
+
+screenplayRoutes.use("/blocks", requireJson);
+screenplayRoutes.post("/blocks", async (context) => {
+  const actor = context.get("actor");
+  const projectId = requiredProjectId(context.req.param("projectId"));
+  await assertProjectAccess(context.env.DB, actor, projectId, "edit");
+  const input = createBlockSchema.parse(await context.req.json());
+  const screenplay = await requireScreenplay(context.env.DB, actor.workspaceId, projectId);
+  const blocks = await loadDraftBlocks(context.env.DB, screenplay.current_draft_id);
+  let lastSceneBlockIndex = -1;
+  for (const [index, block] of blocks.entries()) {
+    if (parseAttributes(block.attributes_json).sceneId === input.sceneId)
+      lastSceneBlockIndex = index;
+  }
+  if (lastSceneBlockIndex < 0)
+    throw new HttpError(404, "scene_not_found", "The selected scene is not in this draft.");
+
+  const previousRank = blocks[lastSceneBlockIndex]?.sort_rank;
+  const nextRank = blocks[lastSceneBlockIndex + 1]?.sort_rank;
+  const blockId = createUuidV7();
+  const now = Date.now();
+  await context.env.DB.batch([
+    context.env.DB.prepare(
+      `INSERT INTO script_draft_blocks
+          (id, workspace_id, project_id, screenplay_id, draft_id, block_type, text_content, attributes_json,
+           sort_rank, version, archived_at, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7, ?8, 1, NULL, ?9, ?9)`,
+    ).bind(
+      blockId,
+      actor.workspaceId,
+      projectId,
+      screenplay.id,
+      screenplay.current_draft_id,
+      dbBlockType(input.type),
+      JSON.stringify({ sceneId: input.sceneId }),
+      rankBetween(previousRank, nextRank),
+      now,
+    ),
+    context.env.DB.prepare(
+      "UPDATE script_drafts SET version = version + 1, updated_at = ?1 WHERE id = ?2",
+    ).bind(now, screenplay.current_draft_id),
+    context.env.DB.prepare(
+      "UPDATE screenplays SET version = version + 1, updated_at = ?1 WHERE id = ?2",
+    ).bind(now, screenplay.id),
+    auditStatement(context.env.DB, {
+      workspaceId: actor.workspaceId,
+      projectId,
+      actor,
+      action: "screenplay.block_created",
+      objectType: "screenplay",
+      objectId: screenplay.id,
+      requestId: context.get("requestId"),
+      occurredAt: now,
+      details: { blockId, sceneId: input.sceneId, type: input.type },
+    }),
+  ]);
+  return ok(context, { created: true as const, blockId }, 201);
 });
 
 screenplayRoutes.post("/import", async (context) => {
