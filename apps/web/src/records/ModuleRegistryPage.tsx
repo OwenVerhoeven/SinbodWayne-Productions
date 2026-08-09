@@ -15,6 +15,7 @@ import { queueOfflineDraft, supportsOfflineDraft } from "../offline/database";
 import { useOfflineDrafts } from "../offline/useOfflineDrafts";
 import { fieldsForRecord, fieldValueForInput } from "./field-catalog";
 import { RecordDetailFields } from "./RecordDetailFields";
+import { workflowForRecord } from "./workflow-catalog";
 
 interface SaveInput {
   id?: string;
@@ -41,6 +42,7 @@ export function ModuleRegistryPage() {
   const [pendingConflict, setPendingConflict] = useState<PendingConflict>();
 
   const recordType = module?.recordType ?? "";
+  const workflow = workflowForRecord(recordType);
   const endpoint = `/api/v1/app/projects/${encodeURIComponent(projectId ?? "")}/records/${encodeURIComponent(recordType)}`;
   const offline = useOfflineDrafts(projectId, recordType);
   const records = useQuery({
@@ -376,12 +378,12 @@ export function ModuleRegistryPage() {
           <div
             aria-labelledby="record-editor-title"
             aria-modal="true"
-            className="record-editor"
+            className="record-editor record-editor--guided"
             role="dialog"
           >
             <header>
               <div>
-                <p>{editor === "new" ? "Create" : "Edit"}</p>
+                <p>{editor === "new" ? "Guided planning" : "Review and refine"}</p>
                 <h2 id="record-editor-title">{module.singular}</h2>
               </div>
               <IconButton
@@ -394,38 +396,55 @@ export function ModuleRegistryPage() {
                 <MoreHorizontal />
               </IconButton>
             </header>
+            <div className="record-workflow-intro">
+              <p>{workflow.intro}</p>
+              <div>
+                <span>What this creates</span>
+                <strong>{workflow.outcome}</strong>
+              </div>
+            </div>
             <form className="record-editor__form" onSubmit={(event) => void submit(event)}>
-              <label>
-                <span>Title</span>
-                <input
-                  autoFocus
-                  defaultValue={editor === "new" ? "" : editor.title}
-                  minLength={2}
-                  name="title"
-                  required
-                />
-              </label>
-              <label>
-                <span>Status</span>
-                <select defaultValue={editor === "new" ? "draft" : editor.status} name="status">
-                  <option value="draft">Draft</option>
-                  <option value="in_review">In review</option>
-                  <option value="approved">Approved</option>
-                  <option value="confirmed">Confirmed</option>
-                  <option value="blocked">Blocked</option>
-                  <option value="superseded">Superseded</option>
-                </select>
-              </label>
-              <label>
-                <span>Summary</span>
-                <textarea
-                  defaultValue={editor === "new" ? "" : (editor.summary ?? "")}
-                  name="summary"
-                  rows={8}
-                />
-              </label>
+              <div className="record-workflow-basics">
+                <div className="record-workflow-basics__heading">
+                  <span>Start here</span>
+                  <strong>Name the work and capture its central purpose.</strong>
+                </div>
+                <label>
+                  <span>{workflow.titleQuestion}</span>
+                  <input
+                    autoFocus
+                    defaultValue={editor === "new" ? "" : editor.title}
+                    minLength={2}
+                    name="title"
+                    placeholder={workflow.titlePlaceholder}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>{workflow.summaryQuestion}</span>
+                  <textarea
+                    defaultValue={editor === "new" ? "" : (editor.summary ?? "")}
+                    name="summary"
+                    placeholder={workflow.summaryPlaceholder}
+                    rows={5}
+                  />
+                </label>
+                <label>
+                  <span>Where is this in the decision process?</span>
+                  <select defaultValue={editor === "new" ? "draft" : editor.status} name="status">
+                    <option value="draft">Still being worked out</option>
+                    <option value="in_review">Ready for review</option>
+                    <option value="approved">Approved direction</option>
+                    <option value="confirmed">Confirmed and actionable</option>
+                    <option value="blocked">Blocked by an unresolved issue</option>
+                    <option value="superseded">Replaced by a newer decision</option>
+                  </select>
+                  <small>Status should describe a real decision, not just form completion.</small>
+                </label>
+              </div>
               <RecordDetailFields
                 details={editor === "new" ? {} : editor.details}
+                key={editor === "new" ? `new-${recordType}` : editor.id}
                 recordType={recordType}
               />
               {pendingConflict ? (

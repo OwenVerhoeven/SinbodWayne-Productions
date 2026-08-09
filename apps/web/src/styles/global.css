@@ -12,6 +12,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 button,
 input,
@@ -1122,16 +1123,97 @@ textarea:focus {
   flex-direction: column;
   gap: 18px;
 }
+.record-editor--guided {
+  gap: 0;
+  padding: 0;
+  width: min(820px, 96vw);
+}
+.record-editor--guided > header {
+  background: var(--swp-chrome);
+  padding: 20px 24px;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+.record-editor--guided .record-editor__form {
+  gap: 0;
+}
+.record-workflow-intro {
+  background: var(--swp-surface-2);
+  border-bottom: 1px solid var(--swp-line);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(220px, 0.65fr);
+  padding: 22px 24px;
+}
+.record-workflow-intro > p {
+  color: var(--swp-text);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin: 0;
+}
+.record-workflow-intro > div {
+  border-left: 1px solid var(--swp-line-strong);
+  display: grid;
+  gap: 6px;
+  padding-left: 16px;
+}
+.record-workflow-intro span,
+.record-workflow-basics__heading > span {
+  color: var(--swp-amber);
+  font:
+    600 0.625rem/1 "Barlow Condensed",
+    sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.record-workflow-intro strong {
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.record-workflow-basics {
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+}
+.record-workflow-basics__heading {
+  display: grid;
+  gap: 6px;
+}
+.record-workflow-basics__heading > strong {
+  font:
+    600 1.15rem/1.25 "Barlow Condensed",
+    sans-serif;
+}
+.record-editor--guided label > span,
+.record-workflow-section__fields label > span {
+  color: var(--swp-text);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+.record-editor--guided label > small,
+.record-workflow-section__fields label > small {
+  color: var(--swp-text-muted);
+  font-size: 0.625rem;
+  line-height: 1.5;
+}
 .record-editor__form > footer {
   margin-top: auto;
+}
+.record-editor--guided .record-editor__form > footer {
+  background: rgb(7 16 20 / 96%);
+  bottom: 0;
+  margin: 0;
+  padding: 16px 24px;
+  position: sticky;
+  z-index: 2;
 }
 .record-detail-fields {
   border: 0;
   border-top: 1px solid var(--swp-line);
-  display: grid;
-  gap: 14px;
+  display: block;
   margin: 2px 0 0;
-  padding: 18px 0 0;
+  padding: 22px 24px 26px;
 }
 .record-detail-fields legend {
   color: var(--swp-amber);
@@ -1146,6 +1228,96 @@ textarea:focus {
   color: var(--swp-text-muted);
   font-size: 0.625rem;
   line-height: 1.45;
+}
+.record-workflow-progress {
+  align-items: center;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  margin-bottom: 18px;
+}
+.record-workflow-progress > div {
+  display: grid;
+  gap: 4px;
+}
+.record-workflow-progress strong {
+  font-size: 0.75rem;
+}
+.record-workflow-progress span {
+  color: var(--swp-text-muted);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+.record-workflow-progress progress {
+  accent-color: var(--swp-cyan);
+  height: 7px;
+  width: 100%;
+}
+.record-workflow-sections {
+  border-bottom: 1px solid var(--swp-line);
+  border-top: 1px solid var(--swp-line);
+}
+.record-workflow-section {
+  border-bottom: 1px solid var(--swp-line);
+}
+.record-workflow-section:last-child {
+  border-bottom: 0;
+}
+.record-workflow-section > summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  list-style: none;
+  min-height: 72px;
+  padding: 12px 10px;
+}
+.record-workflow-section > summary::-webkit-details-marker {
+  display: none;
+}
+.record-workflow-section > summary:hover {
+  background: var(--swp-surface-1);
+}
+.record-workflow-section[open] > summary {
+  background: var(--swp-surface-1);
+  border-bottom: 1px solid var(--swp-line);
+}
+.record-workflow-section__number {
+  align-items: center;
+  border: 1px solid var(--swp-line-strong);
+  color: var(--swp-amber);
+  display: inline-flex;
+  font-family: "Courier Prime", monospace;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+.record-workflow-section > summary > span:nth-child(2) {
+  display: grid;
+  gap: 4px;
+}
+.record-workflow-section > summary strong {
+  font-size: 0.8125rem;
+}
+.record-workflow-section > summary small {
+  color: var(--swp-text-muted);
+  font-size: 0.625rem;
+  line-height: 1.4;
+}
+.record-workflow-section__count {
+  color: var(--swp-text-muted);
+  font:
+    600 0.6875rem/1 "Courier Prime",
+    monospace;
+}
+.record-workflow-section__fields {
+  display: grid;
+  gap: 20px;
+  padding: 22px 10px 26px 54px;
+}
+.record-workflow-section__fields textarea {
+  min-height: 116px;
 }
 .object-collaboration {
   border-top: 1px solid var(--swp-line-strong);
@@ -3471,6 +3643,42 @@ textarea:focus {
 @media (max-width: 720px) {
   .project-page {
     padding: 0 12px 82px;
+  }
+  .record-editor--guided {
+    border-left: 0;
+    max-width: 100%;
+    width: 100%;
+  }
+  .record-editor--guided > header,
+  .record-workflow-basics,
+  .record-detail-fields {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .record-workflow-intro {
+    grid-template-columns: 1fr;
+    padding: 18px 16px;
+  }
+  .record-workflow-intro > div {
+    border-left: 0;
+    border-top: 1px solid var(--swp-line-strong);
+    padding-left: 0;
+    padding-top: 13px;
+  }
+  .record-workflow-progress {
+    gap: 10px;
+    grid-template-columns: 1fr;
+  }
+  .record-workflow-section > summary {
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .record-workflow-section__fields {
+    padding: 20px 0 24px;
+  }
+  .record-editor--guided .record-editor__form > footer {
+    padding: 12px 16px;
   }
   .topbar {
     gap: 8px;

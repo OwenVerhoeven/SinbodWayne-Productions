@@ -181,3 +181,9 @@ Rules include:
 - Is sensitive/private data absent from unauthorized markup, not merely hidden?
 - Are compact, mobile, offline, conflict, archived, unconfigured and print states designed?
 - Does the screen stay visually related to the documented Filmcraft-family tokens without copying a source layout?
+
+## Guided module workbooks
+
+Registry-backed create and edit flows use a shared guided-workbook pattern instead of a flat field dump. Each module defines its own filmmaking questions, section order, outcome statement and plain-language decision states. The interface shows overall and per-section completion while keeping notes and optional production detail available without making every field feel mandatory.
+
+The reference concept is stored at `docs/design/guided-workbook-concept.png`. The implemented version deliberately uses the existing wide editor drawer and section accordions so it preserves established CRUD, optimistic-conflict and offline-draft behavior. Purpose-built workspaces such as screenplay, schedule, call sheet and readiness retain their specialised interfaces.
