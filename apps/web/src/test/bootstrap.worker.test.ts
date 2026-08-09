@@ -28,7 +28,7 @@ beforeAll(async () => {
 });
 
 describe("account bootstrap against an isolated D1 database", () => {
-  it("creates exactly two accounts, is idempotent, and resumes a partial pointer write", async () => {
+  it("creates exactly three accounts, is idempotent, and resumes a partial pointer write", async () => {
     const workspaceId = fixtureId("bootstrap-worker-workspace");
     const now = Date.UTC(2026, 0, 1);
     const provisions = await Promise.all(
@@ -66,7 +66,7 @@ describe("account bootstrap against an isolated D1 database", () => {
       await testEnv.DB.prepare("SELECT COUNT(*) AS count FROM password_credentials").first<number>(
         "count",
       ),
-    ).toBe(2);
+    ).toBe(3);
 
     await testEnv.DB.prepare(
       "UPDATE user_identities SET current_password_credential_id = NULL, version = version + 1 WHERE username = ?",
@@ -93,6 +93,6 @@ describe("account bootstrap against an isolated D1 database", () => {
       await testEnv.DB.prepare("SELECT COUNT(*) AS count FROM password_credentials").first<number>(
         "count",
       ),
-    ).toBe(2);
+    ).toBe(3);
   });
 });

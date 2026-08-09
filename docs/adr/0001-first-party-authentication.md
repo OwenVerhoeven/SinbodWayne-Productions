@@ -1,11 +1,11 @@
-# ADR 0001: First-party authentication and two-account bootstrap
+# ADR 0001: First-party authentication and controlled-account bootstrap
 
 - Status: Accepted
 - Date: 2026-08-08
 
 ## Context
 
-Sinbod Wayne Productions is a private two-person internal tool. The launch requirement is exactly two approved active human identities, with no registration, invitation, guest, demo, hidden administrator or email-reset path. Cloudflare Access may later add a perimeter but cannot replace application identity or authorization.
+Sinbod Wayne Productions is a private internal tool with an explicit account manifest. The current requirement is exactly three approved active identities: an owner, an editing producer, and a view-only guest. There is no registration, invitation, additional demo account, hidden administrator or email-reset path. Cloudflare Access may later add a perimeter but cannot replace application identity or authorization.
 
 Production credentials must never appear in source, migrations, fixtures, documentation, client code, shell arguments/history or logs. The Worker runtime constrains available password KDF implementations. Sessions, CSRF, recovery and role boundaries must remain application-owned and testable.
 
@@ -25,7 +25,7 @@ Implement case-sensitive first-party username/password authentication with:
 - password/privilege change revoking other sessions;
 - owner-controlled recovery limited to the known approved owner identity, using a one-time protected operation and the same hidden-input/KDF path;
 - separate authentication contexts for app users, public/share recipients, service agents and providers;
-- server-side owner/producer policy for every request and sensitive field.
+- server-side owner/producer/viewer policy for every request and sensitive field; viewer access is GET/HEAD-only and excludes live collaboration upgrades.
 
 The KDF selection order is tested against the exact pinned Worker runtime. A native memory-hard option is preferred; a Worker-compatible memory-hard alternative is next. The no-subscription Worker profile uses a pepper-bound PBKDF2-SHA-256 fallback with bounded runtime cost because Free-plan HTTP requests have a materially smaller CPU budget than local/test execution. Its parameters are encoded per credential, and rate limiting/backoff remain mandatory. Raising the work factor or migrating to a memory-hard profile requires runtime qualification and credential rotation.
 

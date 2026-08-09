@@ -23,8 +23,29 @@ const ownerOnly = new Set<PolicyAction>([
 ]);
 
 export function assertAllowed(actor: ActorContext, action: PolicyAction): void {
+  if (actor.role === "viewer") {
+    throw new HttpError(403, "read_only_account", "This account has view-only access.");
+  }
   if (ownerOnly.has(action) && actor.role !== "workspace_owner") {
     throw new HttpError(403, "permission_denied", "Your role does not allow this action.");
+  }
+}
+
+export function assertAppRequestAllowed(
+  actor: ActorContext,
+  method: string,
+  upgrade?: string,
+): void {
+  if (actor.role !== "viewer") return;
+  if (upgrade?.toLowerCase() === "websocket") {
+    throw new HttpError(
+      403,
+      "read_only_account",
+      "Live collaboration is unavailable to view-only accounts.",
+    );
+  }
+  if (!["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) {
+    throw new HttpError(403, "read_only_account", "This account has view-only access.");
   }
 }
 

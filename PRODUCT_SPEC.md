@@ -40,14 +40,15 @@ Issued revisions, decisions, reports, call sheets, sides, packs, readiness issue
 
 ## Users and collaboration
 
-The launch database has exactly two approved active human accounts in one workspace:
+The production database has exactly three approved active accounts in one workspace:
 
 - case-sensitive username `SinbodWayne`, display name `Sinbod Wayne`, role Workspace Owner and Producer;
 - case-sensitive username `KyanWayne`, display name `Kyan Wayne`, role Producer.
+- case-sensitive username `guest`, display name `Guest`, role Viewer with no create, edit, issue, approve, comment, upload, archive, or delete rights.
 
-No public registration, invitations, anonymous creation, default email recovery, demos, guests, or hidden administrators exist in production.
+No public registration, invitations, anonymous creation, default email recovery, additional demos, or hidden administrators exist in production.
 
-The owner controls account provisioning, ownership transfer, workspace deletion, retention, and sensitive owner-only overrides. The producer has full project creation and pre-production editing, including budget, legal, and casting-sensitive work, but not owner-only actions.
+The owner controls account provisioning, ownership transfer, workspace deletion, retention, and sensitive owner-only overrides. The producer has full project creation and pre-production editing, including budget, legal, and casting-sensitive work, but not owner-only actions. The viewer is enforced as read-only by the Worker, including direct API requests.
 
 The owner accepted that bootstrap credentials remain usable until voluntarily changed; the product does not require a first-login rotation. It does provide password change, session/device visibility, revocation, audit, bounded login backoff, and a recovery path that cannot permanently lock out both approved identities.
 

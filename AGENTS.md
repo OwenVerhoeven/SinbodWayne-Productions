@@ -60,7 +60,7 @@ If a script is not yet available during initial construction, add it before clai
 ## Security rules
 
 - Never put production credentials, password-derived material, session credentials, share secrets, service credentials, signed URLs, or provider secrets in the repository, command arguments, logs, screenshots, fixtures, or client bundles.
-- The production account bootstrap is interactive, idempotent, and fail closed. It creates only the two owner-approved identities and never resets an existing credential on deploy.
+- The production account bootstrap is interactive, idempotent, and fail closed. It creates only the three owner-approved identities (owner, producer, viewer) and never resets an existing credential on deploy.
 - Production must never fall back to a development identity. Test identities live only in isolated test databases.
 - Enforce authentication, workspace/project membership, object ownership, action permission, and sensitive-field access in the Worker. A hidden UI control is not authorization.
 - Cookie-authenticated mutations require same-origin and CSRF defenses. Public-share, recipient, service-agent, and provider-webhook routes use separate authentication contexts.

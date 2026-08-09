@@ -182,6 +182,7 @@ export function AppShell() {
             </Status>
           </div>
         ) : null}
+        {auth.account?.role === "viewer" ? <Status tone="neutral">View only</Status> : null}
         <button className="command-trigger" onClick={() => setCommandOpen(true)} type="button">
           <Search aria-hidden="true" />
           <span>Search production</span>
@@ -219,6 +220,14 @@ export function AppShell() {
         </div>
       </header>
       <main className="workspace" id="main-content" tabIndex={-1}>
+        {auth.account?.role === "viewer" ? (
+          <div className="read-only-notice" role="status">
+            <strong>View-only account</strong>
+            <span>
+              You can review production content, but you cannot create, edit or delete it.
+            </span>
+          </div>
+        ) : null}
         <Outlet context={{ activeProject }} />
       </main>
       <CommandPalette

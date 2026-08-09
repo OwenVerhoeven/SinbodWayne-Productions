@@ -14,7 +14,7 @@ interface SessionRow {
   readonly workspace_id: string;
   readonly username: string;
   readonly display_name: string;
-  readonly role: "workspace_owner" | "producer";
+  readonly role: "workspace_owner" | "producer" | "viewer";
   readonly user_auth_epoch: number;
   readonly session_auth_epoch: number;
   readonly csrf_hash: string;
@@ -95,7 +95,7 @@ export async function findActor(context: Context<AppEnv>): Promise<ActorContext 
     `SELECT s.id AS session_id, s.user_id, s.workspace_id, s.csrf_hash,
             s.auth_epoch AS session_auth_epoch, s.last_seen_at,
             u.username, u.display_name, u.auth_epoch AS user_auth_epoch,
-            wm.role
+            CASE WHEN u.access_mode = 'viewer' THEN 'viewer' ELSE wm.role END AS role
        FROM sessions s
        JOIN user_identities u ON u.id = s.user_id AND u.workspace_id = s.workspace_id
        JOIN workspace_memberships wm ON wm.user_id = u.id AND wm.workspace_id = s.workspace_id

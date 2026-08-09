@@ -1,19 +1,19 @@
 # Implementation Status
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 ## Current milestone
 
-**Milestones 0-10 and the local portion of Milestone 11 are complete. Production deployment is externally blocked.**
+**Milestones 0-10 and Milestone 11 deployment are complete. The approved three-account production manifest is provisioned and verified.**
 
 The local release implements the complete pre-production boundary through immutable Ready to Shoot, complete-project export, and the locally tested outbound NAS verification protocol. Production NAS provisioning is a later optional operational rollout. Production-day execution and post-production remain the only intentional future product scopes.
 
-Cloudflare production work was not attempted: `wrangler whoami` reports that no account is authenticated, and `apps/web/wrangler.jsonc` intentionally retains separate all-zero placeholders for the D1 database ID and Workers KV namespace ID until an authorized operator creates or identifies both dedicated resources. No production account, remote migration, resource, DNS record, NAS destination, or deployment is claimed.
+Cloudflare production is deployed at `https://productions.sinbodwayne.nl` with the dedicated D1 and Workers KV bindings. Migration `0009_viewer_access.sql` and Worker version `8003768a-fe5e-4f67-ad5b-d92bfa4bb17b` were deployed on 2026-08-09. Remote inspection verified SinbodWayne, KyanWayne, and guest as active credentialed project members with effective roles owner, producer, and viewer respectively. Production NAS destination provisioning remains optional and separate.
 
 ## Completed release
 
 - Cloudflare-native TypeScript workspace with React/Vite, Hono Worker API, normalized D1 migrations, private Workers KV file versions behind an immutable storage adapter, Workflow archive orchestration, Durable Object invalidation/presence, and an installable PWA shell.
-- First-party login, interactive idempotent two-account bootstrap, hashed/revocable sessions and share/service tokens, role and sensitive-field policies, CSRF/origin controls, audit, collaboration, conflicts and scoped offline drafts.
+- First-party login, interactive idempotent three-account bootstrap, hashed/revocable sessions and share/service tokens, owner/producer/viewer policies, CSRF/origin controls, audit, collaboration, conflicts and scoped offline drafts. The guest viewer is denied all authenticated application mutations and collaboration upgrades server-side.
 - Persisted project graph for development, documents/templates, screenplay and AV writing, canonical scene sync, breakdown, people/casting, locations, visual plans, finance, legal/safety, equipment/logistics, tasks/approvals/calendar, schedules/shoot days, call sheets, production packs and exports.
 - Configurable project/shoot-day readiness with 19 source-backed categories, explicit audited overrides, immutable issue evidence, manifest hashes and precise stale detection.
 - Outbound-only NAS agent with lease/resume, path and link escape rejection, space checks, SHA-256 verification, atomic promotion, idempotent acknowledgement, and no cloud deletion. Its production host, mount, destination, and service credential are not provisioned.

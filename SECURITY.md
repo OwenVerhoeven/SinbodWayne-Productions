@@ -12,11 +12,11 @@ Repository-wide security review covers:
 - `packages/ui`: rendering, input, rich content, file interaction, accessibility, and privacy-preserving states;
 - migrations, tests, build/deploy configuration, scripts, and operational documentation where they can change a production control.
 
-Production has one Sinbod Wayne workspace and exactly two approved active human identities. The application contains sensitive finance, legal, casting, rates, health/accessibility/dietary, emergency, private-recipient, contact, and production-security data. It also creates issued artifacts and archive evidence whose integrity matters operationally.
+Production has one Sinbod Wayne workspace and exactly three approved active identities: one owner, one editing producer, and one view-only guest. The application contains sensitive finance, legal, casting, rates, health/accessibility/dietary, emergency, private-recipient, contact, and production-security data. It also creates issued artifacts and archive evidence whose integrity matters operationally.
 
 ## Threat model and trust boundaries
 
-Trusted actors are the approved owner and producer within their server-enforced roles, an authorized deployment/bootstrap operator, configured provider services authenticated by their documented mechanism, and a least-privilege NAS service identity. Every browser, URL parameter, request body/header, uploaded file, import, rich-text fragment, public link, recipient confirmation, provider callback, service-agent request, and retry is attacker controlled until validated.
+Trusted actors are the approved owner, producer, and viewer within their server-enforced roles, an authorized deployment/bootstrap operator, configured provider services authenticated by their documented mechanism, and a least-privilege NAS service identity. The viewer is not trusted with any mutation capability. Every browser, URL parameter, request body/header, uploaded file, import, rich-text fragment, public link, recipient confirmation, provider callback, service-agent request, and retry is attacker controlled until validated.
 
 Important boundaries are:
 

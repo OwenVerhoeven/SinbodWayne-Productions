@@ -4,6 +4,8 @@ import { ZodError } from "zod";
 
 import { errorEnvelope, ok } from "../server/http/envelope";
 import { HttpError } from "../server/http/errors";
+import { assertAppRequestAllowed } from "../server/auth/policy";
+import { requireActor } from "../server/auth/session";
 import { requestContext, structuredError } from "../server/http/security";
 import { applicationBindings, type AppEnv } from "../server/http/types";
 import {
@@ -30,6 +32,10 @@ import { publicShareRoutes, shareManagementRoutes } from "../server/routes/share
 const app = new Hono<AppEnv>();
 
 app.use("*", requestContext);
+app.use("/api/v1/app/*", requireActor, async (context, next) => {
+  assertAppRequestAllowed(context.get("actor"), context.req.method, context.req.header("Upgrade"));
+  await next();
+});
 
 app.get("/api/v1/health", async (context) => {
   await context.env.DB.prepare("SELECT 1 AS healthy").first();

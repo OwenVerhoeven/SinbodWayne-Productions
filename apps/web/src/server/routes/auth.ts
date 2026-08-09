@@ -44,7 +44,7 @@ interface LoginIdentityRow {
   readonly workspace_id: string;
   readonly username: string;
   readonly display_name: string;
-  readonly role: "workspace_owner" | "producer";
+  readonly role: "workspace_owner" | "producer" | "viewer";
   readonly auth_epoch: number;
   readonly status: string;
   readonly encoded_hash: string;
@@ -109,13 +109,13 @@ authRoutes.post("/owner-recovery", async (context) => {
                FROM user_identities manifest_user
               WHERE manifest_user.workspace_id = bo.workspace_id
                 AND manifest_user.status = 'active'
-                AND manifest_user.archived_at IS NULL) = 2
+                AND manifest_user.archived_at IS NULL) = 3
         AND (SELECT COUNT(*)
                FROM user_identities manifest_user
               WHERE manifest_user.workspace_id = bo.workspace_id
                 AND manifest_user.status = 'active'
                 AND manifest_user.archived_at IS NULL
-                AND manifest_user.username IN ('SinbodWayne', 'KyanWayne')) = 2
+                AND manifest_user.username IN ('SinbodWayne', 'KyanWayne', 'guest')) = 3
       LIMIT 1`,
   )
     .bind(challengeDigest, now)
@@ -265,7 +265,9 @@ authRoutes.post("/login", async (context) => {
   }
 
   const identity = await context.env.DB.prepare(
-    `SELECT u.id, u.workspace_id, u.username, u.display_name, wm.role, u.auth_epoch, u.status, pc.encoded_hash
+    `SELECT u.id, u.workspace_id, u.username, u.display_name,
+            CASE WHEN u.access_mode = 'viewer' THEN 'viewer' ELSE wm.role END AS role,
+            u.auth_epoch, u.status, pc.encoded_hash
        FROM user_identities u
        JOIN workspace_memberships wm ON wm.user_id = u.id AND wm.workspace_id = u.workspace_id
        JOIN password_credentials pc ON pc.id = u.current_password_credential_id AND pc.user_id = u.id
@@ -478,7 +480,7 @@ function sessionView(
         workspaceId: string;
         username: string;
         displayName: string;
-        role: "workspace_owner" | "producer";
+        role: "workspace_owner" | "producer" | "viewer";
       },
   csrfToken: string,
   expiresAt: number,

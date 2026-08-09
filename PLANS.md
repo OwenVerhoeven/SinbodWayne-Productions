@@ -59,11 +59,11 @@ Dependencies: M0 persistence, policy, audit, and test foundations.
 - [x] Build first-party, case-sensitive username/password authentication with generic errors and bounded backoff.
 - [x] Qualify and pin a current Worker-compatible password KDF; keep encoded verifier parameters only.
 - [x] Build one-time hidden-input bootstrap and owner recovery that never logs or resets secrets on deployment.
-- [x] Enforce exactly two approved active production identities and no registration/invitation/demo/default account path.
+- [x] Enforce exactly three approved active production identities (owner, producer, viewer) and no registration/invitation/demo/default account path.
 - [x] Implement hashed high-entropy sessions, secure production cookie, idle/absolute expiry, rotation, auth epoch, listing, logout, and revocation.
 - [x] Implement password change that revokes other sessions and the accepted no-forced-first-login-rotation policy.
 - [x] Implement same-origin/Fetch Metadata/content-type/CSRF mutation defenses.
-- [x] Implement workspace/project membership, owner/producer policy, sensitive-field grants, and cross-tenant denial.
+- [x] Implement workspace/project membership, owner/producer/viewer policy, server-enforced read-only access, sensitive-field grants, and cross-tenant denial.
 - [x] Implement comments, threads, mentions, assignments, approvals foundation, append-only activity, notifications/unread, announcements, and direct messages.
 - [x] Implement conflict envelopes, bounded invalidation/presence channel, BroadcastChannel, and polling fallback without a CRDT claim.
 - [x] Implement hashed, expiring, revocable public/share/recipient/service credential foundations and separate route contexts.

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Sinbod Wayne Productions is an internet-reachable but private two-person pre-production workspace. The Worker serves a React application and resource-oriented API; D1 stores normalized project, authorization, quota, and integrity data; private Workers KV stores bounded immutable file versions and issued/export objects behind a storage adapter; Workflows coordinate durable export/archive jobs; and a focused Durable Object distributes project invalidation/presence signals. The Node-based outbound NAS agent is implemented and locally tested, while production NAS provisioning is a later optional operational step.
+Sinbod Wayne Productions is an internet-reachable but private pre-production workspace for two editing producers and one view-only guest identity. The Worker serves a React application and resource-oriented API; D1 stores normalized project, authorization, quota, and integrity data; private Workers KV stores bounded immutable file versions and issued/export objects behind a storage adapter; Workflows coordinate durable export/archive jobs; and a focused Durable Object distributes project invalidation/presence signals. The Node-based outbound NAS agent is implemented and locally tested, while production NAS provisioning is a later optional operational step.
 
 The highest-value assets are:
 

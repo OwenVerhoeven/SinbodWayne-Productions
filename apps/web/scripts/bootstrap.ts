@@ -50,12 +50,15 @@ async function main(): Promise<void> {
   ) {
     verifyCompletedBootstrap(snapshot);
     process.stdout.write(
-      "Bootstrap already complete: the approved two-account manifest is valid.\n",
+      "Bootstrap already complete: the approved three-account manifest is valid.\n",
     );
     return;
   }
 
   const now = Date.now();
+  const projectIds = (await queryD1(target, "SELECT id FROM projects ORDER BY id;")).map((row) =>
+    String(row.id),
+  );
   const provisions = [];
   for (const [index, account] of missingCredentials.entries()) {
     const password = await readHiddenLine(`Initial password for ${account.username}: `);
@@ -75,6 +78,7 @@ async function main(): Promise<void> {
       missingMemberships,
       credentialPointerRepairs,
       now,
+      projectIds,
     ),
     {
       temporaryPrefix: "swp-bootstrap-",
@@ -83,7 +87,7 @@ async function main(): Promise<void> {
   const verified = parseBootstrapSnapshot((await queryD1(target, bootstrapInspectionSql))[0]);
   verifyCompletedBootstrap(verified);
   process.stdout.write(
-    "Bootstrap complete: exactly the approved two active accounts were verified.\n",
+    "Bootstrap complete: exactly the approved three active accounts were verified.\n",
   );
 }
 

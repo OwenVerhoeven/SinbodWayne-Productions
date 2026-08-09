@@ -15,7 +15,7 @@ const accountSchema = z.object({
   id: z.string(),
   username: z.string(),
   displayName: z.string(),
-  role: z.enum(["workspace_owner", "producer"]),
+  role: z.enum(["workspace_owner", "producer", "viewer"]),
   workspaceId: z.string(),
 });
 

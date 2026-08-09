@@ -1304,6 +1304,7 @@ interface WorkspaceSecurityRow {
   readonly active_memberships: number;
   readonly owner_users: number;
   readonly producer_users: number;
+  readonly viewer_users: number;
   readonly role_mismatches: number;
   readonly identity_watermark: number;
   readonly membership_watermark: number;
@@ -1332,6 +1333,9 @@ async function workspaceSecurityObservation(
           (SELECT COUNT(*) FROM user_identities u
             WHERE u.workspace_id = ?1 AND u.status = 'active' AND u.archived_at IS NULL
               AND u.role = 'producer') AS producer_users,
+          (SELECT COUNT(*) FROM user_identities u
+            WHERE u.workspace_id = ?1 AND u.status = 'active' AND u.archived_at IS NULL
+              AND u.access_mode = 'viewer') AS viewer_users,
           (SELECT COUNT(*) FROM workspace_memberships wm
             JOIN user_identities u ON u.id = wm.user_id AND u.workspace_id = wm.workspace_id
             WHERE wm.workspace_id = ?1 AND wm.status = 'active' AND wm.archived_at IS NULL
@@ -1343,21 +1347,22 @@ async function workspaceSecurityObservation(
     .first<WorkspaceSecurityRow>();
   const satisfied =
     row !== null &&
-    row.active_users === 2 &&
-    row.credentialed_users === 2 &&
-    row.active_memberships === 2 &&
+    row.active_users === 3 &&
+    row.credentialed_users === 3 &&
+    row.active_memberships === 3 &&
     row.owner_users === 1 &&
-    row.producer_users === 1 &&
+    row.producer_users === 2 &&
+    row.viewer_users === 1 &&
     row.role_mismatches === 0;
   return {
     present: row !== null,
     satisfied,
     description: satisfied
-      ? "Exactly two credentialed active accounts share the workspace with the required owner and producer boundary."
-      : "Workspace security requires exactly two credentialed active accounts: one owner and one producer.",
+      ? "Exactly three credentialed active accounts share the workspace: one owner, one producer and one view-only guest."
+      : "Workspace security requires exactly three credentialed active accounts: one owner, one producer and one view-only guest.",
     sourceLabel: "Workspace identity boundary",
     evidence: row
-      ? `${row.active_users} active account(s), ${row.owner_users} owner(s), ${row.producer_users} producer(s)`
+      ? `${row.active_users} active account(s), ${row.owner_users} owner(s), ${row.producer_users - row.viewer_users} editing producer(s), ${row.viewer_users} viewer(s)`
       : null,
     fingerprint: row ? { ...row } : { workspace: "unavailable" },
   };

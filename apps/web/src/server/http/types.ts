@@ -1,6 +1,6 @@
 import { KvPrivateObjectStore, type PrivateObjectStore } from "../storage/private-object-store";
 
-export type WorkspaceRole = "workspace_owner" | "producer";
+export type WorkspaceRole = "workspace_owner" | "producer" | "viewer";
 
 export interface ActorContext {
   readonly userId: string;

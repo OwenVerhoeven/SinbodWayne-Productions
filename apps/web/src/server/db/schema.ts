@@ -29,6 +29,7 @@ export const userIdentities = sqliteTable(
     username: text("username", { mode: "text" }).notNull(),
     displayName: text("display_name").notNull(),
     role: text("role", { enum: ["workspace_owner", "producer"] }).notNull(),
+    accessMode: text("access_mode", { enum: ["editor", "viewer"] }).notNull(),
     status: text("status", { enum: ["active", "suspended", "archived"] }).notNull(),
     authEpoch: integer("auth_epoch").notNull(),
     currentPasswordCredentialId: text("current_password_credential_id"),

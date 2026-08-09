@@ -56,9 +56,9 @@ The exact results are recorded in `IMPLEMENTATION_STATUS.md`. Browser verificati
 
 ## Authentication and production accounts
 
-The launch workspace has exactly two owner-approved active human identities: `SinbodWayne` (Workspace Owner and Producer) and `KyanWayne` (Producer). Usernames are case-sensitive. There is no public registration, invitation, guest, hidden administrator, or email-reset flow. The one-time bootstrap is idempotent: it creates missing approved identities, never resets an existing credential, and verifies the exact production account invariant.
+The workspace has exactly three owner-approved active identities: `SinbodWayne` (Workspace Owner and Producer), `KyanWayne` (Producer), and `guest` (Viewer). Usernames are case-sensitive. There is no public registration, invitation, additional demo account, hidden administrator, or email-reset flow. The one-time bootstrap is idempotent: it creates missing approved identities, never resets an existing credential, and verifies the exact production account invariant.
 
-The owner has workspace/security/retention authority. The producer can create and fully edit projects, including sensitive pre-production work, but cannot provision accounts, transfer ownership, permanently delete the workspace, perform owner-only retention actions, or override owner-only readiness categories.
+The owner has workspace/security/retention authority. The producer can create and fully edit projects, including sensitive pre-production work, but cannot provision accounts, transfer ownership, permanently delete the workspace, perform owner-only retention actions, or override owner-only readiness categories. The viewer can browse permitted workspace and project content but all authenticated application mutations and collaboration WebSocket upgrades are denied server-side.
 
 The owner explicitly chose not to force first-login credential rotation. Password change and session revocation remain available, and changing a password invalidates other sessions.
 

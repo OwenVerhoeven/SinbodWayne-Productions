@@ -5,7 +5,7 @@ import { uuidV7From } from "@swp/domain";
 import { encodePassword } from "../../src/server/auth/crypto";
 import { insertOrIgnore, sqlInteger, sqlJson, sqlText } from "./sql";
 
-export type LaunchRole = "workspace_owner" | "producer";
+export type LaunchRole = "workspace_owner" | "producer" | "viewer";
 
 export interface LaunchAccount {
   readonly username: string;
@@ -16,7 +16,16 @@ export interface LaunchAccount {
 export const launchAccounts = [
   { username: "SinbodWayne", displayName: "Sinbod Wayne", role: "workspace_owner" },
   { username: "KyanWayne", displayName: "Kyan Wayne", role: "producer" },
+  { username: "guest", displayName: "Guest", role: "viewer" },
 ] as const satisfies readonly LaunchAccount[];
+
+function storedRole(account: LaunchAccount): "workspace_owner" | "producer" {
+  return account.role === "viewer" ? "producer" : account.role;
+}
+
+function accessMode(account: LaunchAccount): "editor" | "viewer" {
+  return account.role === "viewer" ? "viewer" : "editor";
+}
 
 export interface BootstrapWorkspaceRow {
   id: string;
@@ -31,6 +40,7 @@ export interface BootstrapUserRow {
   username: string;
   displayName: string;
   role: LaunchRole;
+  accessMode: "editor" | "viewer";
   status: string;
   archived: boolean;
   currentCredentialId: string | null;
@@ -109,7 +119,7 @@ export function parseBootstrapSnapshot(
         throw new Error("Invalid account inspection row.");
       const rowItem = item as Record<string, unknown>;
       const role = String(rowItem.role);
-      if (role !== "workspace_owner" && role !== "producer")
+      if (role !== "workspace_owner" && role !== "producer" && role !== "viewer")
         throw new Error("Invalid account role in bootstrap inspection.");
       return {
         id: String(rowItem.id),
@@ -117,6 +127,7 @@ export function parseBootstrapSnapshot(
         username: String(rowItem.username),
         displayName: String(rowItem.displayName),
         role,
+        accessMode: rowItem.accessMode === "viewer" ? "viewer" : "editor",
         status: String(rowItem.status),
         archived: Boolean(rowItem.archived),
         currentCredentialId:
@@ -149,7 +160,8 @@ SELECT json_object(
       'workspaceId', u.workspace_id,
       'username', u.username,
       'displayName', u.display_name,
-      'role', u.role,
+      'role', CASE WHEN u.access_mode = 'viewer' THEN 'viewer' ELSE u.role END,
+      'accessMode', u.access_mode,
       'status', u.status,
       'archived', u.archived_at IS NOT NULL,
       'currentCredentialId', u.current_password_credential_id,
@@ -189,6 +201,7 @@ export function validatePreflight(snapshot: BootstrapSnapshot): BootstrapPreflig
       user.workspaceId !== workspace?.id ||
       user.displayName !== account.displayName ||
       user.role !== account.role ||
+      user.accessMode !== accessMode(account) ||
       user.status !== "active" ||
       user.archived
     ) {
@@ -220,7 +233,7 @@ export function validatePreflight(snapshot: BootstrapSnapshot): BootstrapPreflig
     }
     if (
       user.membershipRole !== null &&
-      (user.membershipRole !== account.role || user.membershipStatus !== "active")
+      (user.membershipRole !== storedRole(account) || user.membershipStatus !== "active")
     ) {
       throw new Error(
         `Existing identity ${account.username} has an inconsistent workspace membership.`,
@@ -265,7 +278,7 @@ export function verifyCompletedBootstrap(snapshot: BootstrapSnapshot): void {
   }
   for (const account of launchAccounts) {
     const user = snapshot.users.find((candidate) => candidate.username === account.username);
-    if (user?.membershipRole !== account.role || user.membershipStatus !== "active") {
+    if (user?.membershipRole !== storedRole(account) || user.membershipStatus !== "active") {
       throw new Error(`Bootstrap verification failed for ${account.username} membership.`);
     }
   }
@@ -297,6 +310,7 @@ export function buildBootstrapSql(
   membershipRepairs: readonly LaunchAccount[],
   credentialPointerRepairs: readonly BootstrapUserRow[],
   now: number,
+  projectIds: readonly string[] = [],
 ): string {
   const statements = ["PRAGMA foreign_keys = ON;"];
   if (snapshot.workspaces.length === 0) {
@@ -316,7 +330,7 @@ export function buildBootstrapSql(
       }),
     );
   }
-  for (const provision of provisions) {
+  for (const [provisionIndex, provision] of provisions.entries()) {
     if (provision.isNewIdentity) {
       statements.push(
         insertOrIgnore("user_identities", {
@@ -324,7 +338,8 @@ export function buildBootstrapSql(
           workspace_id: sqlText(workspaceId),
           username: sqlText(provision.username),
           display_name: sqlText(provision.displayName),
-          role: sqlText(provision.role),
+          role: sqlText(storedRole(provision)),
+          access_mode: sqlText(accessMode(provision)),
           status: sqlText("active"),
           created_at: sqlInteger(now),
           updated_at: sqlInteger(now),
@@ -353,7 +368,21 @@ export function buildBootstrapSql(
           id: sqlText(provision.membershipId),
           workspace_id: sqlText(workspaceId),
           user_id: sqlText(provision.id),
-          role: sqlText(provision.role),
+          role: sqlText(storedRole(provision)),
+          status: sqlText("active"),
+          created_at: sqlInteger(now),
+          updated_at: sqlInteger(now),
+        }),
+      );
+    }
+    for (const [projectIndex, projectId] of projectIds.entries()) {
+      statements.push(
+        insertOrIgnore("project_memberships", {
+          id: sqlText(generatedId(now + 400 + provisionIndex * 100 + projectIndex)),
+          workspace_id: sqlText(workspaceId),
+          project_id: sqlText(projectId),
+          user_id: sqlText(provision.id),
+          role: sqlText(provision.role === "workspace_owner" ? "owner" : "producer"),
           status: sqlText("active"),
           created_at: sqlInteger(now),
           updated_at: sqlInteger(now),
@@ -384,7 +413,7 @@ export function buildBootstrapSql(
         id: sqlText(provision?.membershipId ?? generatedId(now + 200 + index)),
         workspace_id: sqlText(workspaceId),
         user_id: sqlText(userId),
-        role: sqlText(account.role),
+        role: sqlText(storedRole(account)),
         status: sqlText("active"),
         created_at: sqlInteger(now),
         updated_at: sqlInteger(now),
