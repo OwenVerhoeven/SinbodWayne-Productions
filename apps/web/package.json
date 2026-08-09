@@ -19,6 +19,7 @@
     "bootstrap:remote": "tsx scripts/bootstrap.ts --target production",
     "recover-owner:local": "tsx scripts/recover-owner.ts --target local",
     "recover-owner:remote": "tsx scripts/recover-owner.ts --target production",
+    "recover-approved-account:remote": "tsx scripts/recover-approved-account.ts",
     "seed": "npm run seed:test",
     "seed:test": "tsx scripts/seed.ts --target test",
     "seed:local": "tsx scripts/seed.ts --target local",

@@ -32,6 +32,13 @@ const ownerRecoverySchema = z
     password: z.string().min(1).max(1024),
   })
   .strict();
+const approvedRecoverySchema = z
+  .object({
+    challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
+    username: z.enum(["KyanWayne", "guest"]),
+    password: z.string().min(1).max(1024),
+  })
+  .strict();
 const passwordChangeSchema = z
   .object({
     currentPassword: z.string().min(1).max(1024),
@@ -59,6 +66,13 @@ interface OwnerRecoveryRow {
   readonly operation_id: string;
   readonly workspace_id: string;
   readonly owner_id: string;
+  readonly previous_credential_id: string;
+}
+
+interface ApprovedRecoveryRow {
+  readonly operation_id: string;
+  readonly workspace_id: string;
+  readonly user_id: string;
   readonly previous_credential_id: string;
 }
 
@@ -231,6 +245,137 @@ authRoutes.post("/owner-recovery", async (context) => {
     );
   }
 
+  return ok(context, { recovered: true as const });
+});
+
+authRoutes.use("/approved-recovery", requireSameOrigin, requireJson);
+
+authRoutes.post("/approved-recovery", async (context) => {
+  const input = approvedRecoverySchema.parse(await context.req.json());
+  const ip = context.req.header("CF-Connecting-IP") ?? "unknown";
+  const rateKey = await sha256(`${ip}\u0000approved-recovery`);
+  const rate = await context.env.PUBLIC_RATE_LIMITER.limit({ key: rateKey.slice(0, 64) });
+  if (!rate.success) {
+    throw new HttpError(
+      429,
+      "recovery_unavailable",
+      "Account recovery is temporarily unavailable.",
+    );
+  }
+
+  const now = Date.now();
+  const challengeDigest = await sha256(input.challenge);
+  const operation = await context.env.DB.prepare(
+    `SELECT bo.id AS operation_id, bo.workspace_id, u.id AS user_id,
+            u.current_password_credential_id AS previous_credential_id
+       FROM bootstrap_operations bo
+       JOIN user_identities u
+         ON u.workspace_id = bo.workspace_id
+        AND u.username = ?3 COLLATE BINARY
+        AND u.status = 'active' AND u.archived_at IS NULL
+       JOIN workspace_memberships wm
+         ON wm.workspace_id = u.workspace_id AND wm.user_id = u.id
+        AND wm.status = 'active' AND wm.archived_at IS NULL
+       JOIN password_credentials pc
+         ON pc.id = u.current_password_credential_id
+        AND pc.user_id = u.id AND pc.superseded_at IS NULL
+      WHERE bo.challenge_digest = ?1 AND bo.state = 'created' AND bo.expires_at > ?2
+        AND (SELECT COUNT(*) FROM user_identities manifest_user
+              WHERE manifest_user.workspace_id = bo.workspace_id
+               AND manifest_user.status = 'active' AND manifest_user.archived_at IS NULL) = 3
+        AND (SELECT COUNT(*) FROM user_identities manifest_user
+              WHERE manifest_user.workspace_id = bo.workspace_id
+               AND manifest_user.status = 'active' AND manifest_user.archived_at IS NULL
+               AND manifest_user.username IN ('SinbodWayne', 'KyanWayne', 'guest')) = 3
+      LIMIT 1`,
+  )
+    .bind(challengeDigest, now, input.username)
+    .first<ApprovedRecoveryRow>();
+  if (!operation) {
+    await performDummyPasswordWork(input.password, context.env.AUTH_PEPPER);
+    throw new HttpError(404, "recovery_not_available", "Account recovery is not available.");
+  }
+
+  const credential = await encodePassword(input.password, context.env.AUTH_PEPPER);
+  const credentialId = createUuidV7();
+  const guardId = createUuidV7();
+  try {
+    await context.env.DB.batch([
+      context.env.DB.prepare(
+        `INSERT INTO optimistic_mutation_guards (id, expected_version, actual_version, created_at)
+         SELECT ?1, 1, CASE WHEN EXISTS (
+           SELECT 1 FROM bootstrap_operations bo
+           JOIN user_identities u ON u.workspace_id = bo.workspace_id AND u.id = ?3
+            AND u.current_password_credential_id = ?4 AND u.status = 'active' AND u.archived_at IS NULL
+           JOIN password_credentials pc ON pc.id = u.current_password_credential_id
+            AND pc.user_id = u.id AND pc.superseded_at IS NULL
+           WHERE bo.id = ?2 AND bo.state = 'created' AND bo.expires_at > ?5
+         ) THEN 1 ELSE 0 END, ?5`,
+      ).bind(
+        guardId,
+        operation.operation_id,
+        operation.user_id,
+        operation.previous_credential_id,
+        now,
+      ),
+      context.env.DB.prepare(
+        `UPDATE password_credentials SET superseded_at = ?1
+          WHERE id = ?2 AND workspace_id = ?3 AND user_id = ?4 AND superseded_at IS NULL`,
+      ).bind(now, operation.previous_credential_id, operation.workspace_id, operation.user_id),
+      context.env.DB.prepare(
+        `INSERT INTO password_credentials
+          (id, workspace_id, user_id, kdf, parameters_json, encoded_hash, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+      ).bind(
+        credentialId,
+        operation.workspace_id,
+        operation.user_id,
+        credential.kdf,
+        credential.parameters,
+        credential.encodedHash,
+        now,
+      ),
+      context.env.DB.prepare(
+        `UPDATE user_identities SET current_password_credential_id = ?1,
+           auth_epoch = auth_epoch + 1, failed_login_count = 0, backoff_until = NULL,
+           updated_at = ?2, version = version + 1
+         WHERE id = ?3 AND workspace_id = ?4 AND current_password_credential_id = ?5
+          AND status = 'active' AND archived_at IS NULL`,
+      ).bind(
+        credentialId,
+        now,
+        operation.user_id,
+        operation.workspace_id,
+        operation.previous_credential_id,
+      ),
+      context.env.DB.prepare(
+        `UPDATE sessions SET revoked_at = ?1,
+           revoke_reason = COALESCE(revoke_reason, 'approved_credential_recovery')
+         WHERE workspace_id = ?2 AND user_id = ?3 AND revoked_at IS NULL`,
+      ).bind(now, operation.workspace_id, operation.user_id),
+      context.env.DB.prepare("DELETE FROM login_attempts"),
+      context.env.DB.prepare(
+        `UPDATE bootstrap_operations SET state = 'consumed', consumed_at = ?1
+          WHERE id = ?2 AND state = 'created' AND expires_at > ?1`,
+      ).bind(now, operation.operation_id),
+      auditStatement(context.env.DB, {
+        workspaceId: operation.workspace_id,
+        action: "auth.approved_credential_recovered",
+        objectType: "user_identity",
+        objectId: operation.user_id,
+        requestId: context.get("requestId"),
+        occurredAt: now,
+        details: { username: input.username, source: "one_time_challenge", sessionsRevoked: true },
+      }),
+      context.env.DB.prepare("DELETE FROM optimistic_mutation_guards WHERE id = ?1").bind(guardId),
+    ]);
+  } catch {
+    throw new HttpError(
+      409,
+      "recovery_conflict",
+      "Account recovery could not be applied to the current account state.",
+    );
+  }
   return ok(context, { recovered: true as const });
 });
 

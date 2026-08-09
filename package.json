@@ -20,6 +20,7 @@
     "bootstrap:remote": "npm run bootstrap:remote --workspace @swp/web",
     "recover-owner:local": "npm run recover-owner:local --workspace @swp/web",
     "recover-owner:remote": "npm run recover-owner:remote --workspace @swp/web",
+    "recover-approved-account:remote": "npm run recover-approved-account:remote --workspace @swp/web --",
     "seed": "npm run seed --workspace @swp/web",
     "seed:test": "npm run seed:test --workspace @swp/web",
     "seed:local": "npm run seed:local --workspace @swp/web",

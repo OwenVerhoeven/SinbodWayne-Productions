@@ -62,6 +62,8 @@ The owner has workspace/security/retention authority. The producer can create an
 
 The owner explicitly chose not to force first-login credential rotation. Password change and session revocation remain available, and changing a password invalidates other sessions.
 
+An operator can explicitly rotate either approved non-owner credential with `npm run recover-approved-account:remote -- --username KyanWayne` or `--username guest`. The utility requires production and account confirmation plus hidden password entry, derives the production verifier inside the Worker using a one-time challenge, revokes prior sessions, and verifies a real login without retaining the verification session.
+
 The no-subscription Cloudflare profile keeps a random `AUTH_PEPPER` as a Worker secret (never a Git build variable) and records only salted, pepper-bound PBKDF2 verifier parameters in D1. Owner recovery uses `npm run recover-owner:remote`: it accepts the replacement through hidden input, creates a five-minute one-time challenge whose digest is stored in D1, derives the verifier inside the Worker, consumes the challenge atomically, revokes prior sessions, and audits the operation.
 
 ## Providers and manual fallbacks

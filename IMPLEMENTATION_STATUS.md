@@ -8,7 +8,7 @@ Last updated: 2026-08-09
 
 The local release implements the complete pre-production boundary through immutable Ready to Shoot, complete-project export, and the locally tested outbound NAS verification protocol. Production NAS provisioning is a later optional operational rollout. Production-day execution and post-production remain the only intentional future product scopes.
 
-Cloudflare production is deployed at `https://productions.sinbodwayne.nl` with the dedicated D1 and Workers KV bindings. Migration `0009_viewer_access.sql` and Worker version `8003768a-fe5e-4f67-ad5b-d92bfa4bb17b` were deployed on 2026-08-09. Remote inspection verified SinbodWayne, KyanWayne, and guest as active credentialed project members with effective roles owner, producer, and viewer respectively. Production NAS destination provisioning remains optional and separate.
+Cloudflare production is deployed at `https://productions.sinbodwayne.nl` with the dedicated D1 and Workers KV bindings. Migration `0009_viewer_access.sql` and Worker version `be29d041-8221-42b9-b242-895bcfbcbcc4` were deployed on 2026-08-09. Remote inspection verified SinbodWayne, KyanWayne, and guest as active credentialed project members with effective roles owner, producer, and viewer respectively. KyanWayne and guest credentials were explicitly rotated through one-time Worker-side peppered recovery, verified against the live login endpoint, and their verification sessions were revoked. A live guest mutation probe returned `403/read_only_account`. Production NAS destination provisioning remains optional and separate.
 
 ## Completed release
 
