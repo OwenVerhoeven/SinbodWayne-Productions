@@ -1,4 +1,4 @@
-import { createUuidV7, rankBetween } from "@swp/domain";
+import { createUuidV7, rankBetween, rebalanceRanks } from "@swp/domain";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -202,14 +202,16 @@ recordRoutes.post("/:recordType", async (context) => {
   await assertProjectAccess(context.env.DB, actor, projectId, "edit");
   const input = createSchema.parse(await context.req.json());
   const details = boundedDetails(input.details ?? {});
-  const last = await context.env.DB.prepare(
-    `SELECT sort_rank FROM ${definition.table} WHERE workspace_id = ?1 AND project_id = ?2 ORDER BY sort_rank DESC LIMIT 1`,
-  )
-    .bind(actor.workspaceId, projectId)
-    .first<{ sort_rank: string }>();
   const id = createUuidV7();
   const now = Date.now();
-  const rank = rankBetween(last?.sort_rank, undefined);
+  const rankPlan = await appendRankPlan(
+    context.env.DB,
+    definition.table,
+    actor.workspaceId,
+    projectId,
+    id,
+  );
+  const rank = rankPlan.rank;
   const recordInsert =
     definition.objectType === "idea"
       ? context.env.DB.prepare(
@@ -265,6 +267,7 @@ recordRoutes.post("/:recordType", async (context) => {
             now,
           );
   await context.env.DB.batch([
+    ...rankPlan.repairs,
     recordInsert,
     context.env.DB.prepare(
       "INSERT INTO object_registry (id, workspace_id, project_id, object_type, domain_table, domain_id, title, version, archived_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, NULL, ?8, ?8)",
@@ -733,6 +736,47 @@ function csvDetail(value: unknown): string {
 
 function isConstraintError(error: unknown): boolean {
   return error instanceof Error && /constraint|CHECK|NOT NULL/iu.test(error.message);
+}
+
+async function appendRankPlan(
+  db: D1Database,
+  table: string,
+  workspaceId: string,
+  projectId: string,
+  newId: string,
+): Promise<{ rank: string; repairs: D1PreparedStatement[] }> {
+  const rows = await db
+    .prepare(
+      `SELECT id, sort_rank FROM ${table} WHERE workspace_id = ?1 AND project_id = ?2 ORDER BY sort_rank, id`,
+    )
+    .bind(workspaceId, projectId)
+    .all<{ id: string; sort_rank: string }>();
+  const last = rows.results.at(-1)?.sort_rank;
+  try {
+    return { rank: rankBetween(last, undefined), repairs: [] };
+  } catch {
+    // Early builds used short display ranks (for example "a0"). Repair them in
+    // their existing order so adding a new record never strands production data.
+    const orderedIds = [...rows.results.map((row) => row.id), newId];
+    const ranks = rebalanceRanks(orderedIds);
+    return {
+      rank: requireRank(ranks, newId),
+      repairs: rows.results.map((row) =>
+        db
+          .prepare(
+            `UPDATE ${table} SET sort_rank = ?1 WHERE id = ?2 AND workspace_id = ?3 AND project_id = ?4`,
+          )
+          .bind(requireRank(ranks, row.id), row.id, workspaceId, projectId),
+      ),
+    };
+  }
+}
+
+function requireRank(ranks: ReadonlyMap<string, string>, id: string): string {
+  const rank = ranks.get(id);
+  if (!rank)
+    throw new HttpError(500, "rank_repair_failed", "The record order could not be repaired.");
+  return rank;
 }
 
 async function recordConflict(

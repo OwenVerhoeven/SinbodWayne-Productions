@@ -1,7 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive,
   ArchiveRestore,
   ArrowRight,
   FolderPlus,
@@ -10,13 +9,16 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Trash2,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { z } from "zod";
-import { Button, ProgressBar, Status, SurfaceBoundary, Wordmark } from "@swp/ui";
+import { Button, Status, SurfaceBoundary, Wordmark } from "@swp/ui";
 
 import { apiRequest, jsonBody } from "../api/client";
-import { projectListSchema, projectSchema } from "../app/schemas";
+import { projectListSchema, projectSchema, type ProjectSummary } from "../app/schemas";
+import { useAuth } from "../auth/auth-context";
+import { creativeStatusLabel, creativeStatusTone } from "../creative/creative-progress";
 
 const productionTypeSchema = z.enum([
   "short_film",
@@ -50,12 +52,16 @@ type Idea = z.infer<typeof ideaSchema>;
 export function ProjectListPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const auth = useAuth();
+  const canEdit = auth.account?.role !== "viewer";
   const [view, setView] = useState<"projects" | "ideas">("projects");
   const [search, setSearch] = useState("");
   const [directoryState, setDirectoryState] = useState<"active" | "archived">("active");
   const [createOpen, setCreateOpen] = useState(false);
   const [ideaEditor, setIdeaEditor] = useState<Idea | "new">();
   const [promoteIdea, setPromoteIdea] = useState<Idea>();
+  const [projectToDelete, setProjectToDelete] = useState<ProjectSummary>();
+  const [ideaToDelete, setIdeaToDelete] = useState<Idea>();
   const projects = useQuery({
     enabled: view === "projects",
     queryKey: ["projects", search, directoryState],
@@ -79,6 +85,22 @@ export function ProjectListPage() {
       apiRequest("/api/v1/app/projects", projectSchema, { method: "POST", body: jsonBody(input) }),
     onSuccess: async () => {
       setCreateOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+  const changeProjectLifecycle = useMutation({
+    mutationFn: (project: ProjectSummary) =>
+      apiRequest(
+        `/api/v1/app/projects/${encodeURIComponent(project.id)}/${project.archivedAt ? "restore" : "archive"}`,
+        projectSchema,
+        {
+          method: "POST",
+          headers: { "If-Match": `"${project.version}"` },
+          body: jsonBody({}),
+        },
+      ),
+    onSuccess: async () => {
+      setProjectToDelete(undefined);
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
   });
@@ -122,7 +144,10 @@ export function ProjectListPage() {
         ideaSchema,
         { method: "POST", headers: { "If-Match": `"${idea.version}"` }, body: jsonBody({}) },
       ),
-    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["ideas"] }),
+    onSuccess: async () => {
+      setIdeaToDelete(undefined);
+      await queryClient.invalidateQueries({ queryKey: ["ideas"] });
+    },
   });
   const promote = useMutation({
     mutationFn: (input: { idea: Idea; code: string; type: string }) =>
@@ -198,15 +223,15 @@ export function ProjectListPage() {
               : "Capture first sparks before a screenplay or production exists, then promote without losing history."}
           </p>
         </div>
-        {view === "projects" ? (
+        {canEdit && view === "projects" ? (
           <Button icon={<FolderPlus />} onClick={() => setCreateOpen(true)} variant="primary">
             New production
           </Button>
-        ) : (
+        ) : canEdit ? (
           <Button icon={<Plus />} onClick={() => setIdeaEditor("new")} variant="primary">
             Capture idea
           </Button>
-        )}
+        ) : null}
       </header>
       <div aria-label="Workspace directory" className="directory-tabs" role="tablist">
         <button
@@ -242,7 +267,7 @@ export function ProjectListPage() {
           aria-pressed={directoryState === "archived"}
           variant="quiet"
         >
-          {directoryState === "archived" ? `Active ${view}` : `Archived ${view}`}
+          {directoryState === "archived" ? `Active ${view}` : `Deleted ${view}`}
         </Button>
       </div>
       {view === "projects" ? (
@@ -257,38 +282,55 @@ export function ProjectListPage() {
                 <tr>
                   <th>Production</th>
                   <th>Type</th>
-                  <th>Phase</th>
-                  <th>Readiness</th>
+                  <th>Writing status</th>
                   <th>Updated</th>
+                  {canEdit ? <th>Actions</th> : null}
                 </tr>
               </thead>
               <tbody>
                 {projectItems.map((project) => (
                   <tr key={project.id}>
                     <th data-label="Production" scope="row">
-                      <Link to={`/projects/${project.id}/overview`}>
-                        <strong>{project.title}</strong>
+                      {project.archivedAt ? (
                         <span>
-                          {project.code}
-                          {project.workingTitle ? ` · ${project.workingTitle}` : ""}
+                          <strong>{project.title}</strong>
+                          <span>{project.code}</span>
                         </span>
-                      </Link>
+                      ) : (
+                        <Link to={`/projects/${project.id}/overview`}>
+                          <strong>{project.title}</strong>
+                          <span>
+                            {project.code}
+                            {project.workingTitle ? ` · ${project.workingTitle}` : ""}
+                          </span>
+                        </Link>
+                      )}
                     </th>
                     <td data-label="Type">{project.type.replaceAll("_", " ")}</td>
-                    <td data-label="Phase">
-                      <Status tone="info">{project.phase}</Status>
-                    </td>
-                    <td data-label="Readiness">
-                      <ProgressBar
-                        label={`${project.title} readiness`}
-                        value={project.readinessScore}
-                      />
+                    <td data-label="Writing status">
+                      <Status tone={creativeStatusTone(project.creativeStatus)}>
+                        {creativeStatusLabel(project.creativeStatus)}
+                      </Status>
                     </td>
                     <td data-label="Updated">
                       <time dateTime={new Date(project.updatedAt).toISOString()}>
                         {relativeDay(project.updatedAt)}
                       </time>
                     </td>
+                    {canEdit ? (
+                      <td data-label="Actions">
+                        <Button
+                          icon={project.archivedAt ? <RotateCcw /> : <Trash2 />}
+                          onClick={() => {
+                            if (project.archivedAt) changeProjectLifecycle.mutate(project);
+                            else setProjectToDelete(project);
+                          }}
+                          variant="quiet"
+                        >
+                          {project.archivedAt ? "Restore" : "Delete"}
+                        </Button>
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -297,7 +339,7 @@ export function ProjectListPage() {
         ) : (
           <SurfaceBoundary
             action={
-              directoryState === "active" ? (
+              canEdit && directoryState === "active" ? (
                 <Button icon={<FolderPlus />} onClick={() => setCreateOpen(true)} variant="primary">
                   Create production
                 </Button>
@@ -306,12 +348,10 @@ export function ProjectListPage() {
             description={
               directoryState === "active"
                 ? "Create a standalone project or start from a workspace template."
-                : "Archived productions remain recoverable until an authorised retention action."
+                : "Deleted productions remain recoverable until an authorised retention action."
             }
             state="empty"
-            title={
-              directoryState === "active" ? "No active productions" : "No archived productions"
-            }
+            title={directoryState === "active" ? "No active productions" : "No deleted productions"}
           />
         )
       ) : ideas.isLoading ? (
@@ -349,38 +389,43 @@ export function ProjectListPage() {
                   ))}
                 </div>
               ) : null}
-              <footer>
-                <Button icon={<Pencil />} onClick={() => setIdeaEditor(idea)} variant="quiet">
-                  Edit
-                </Button>
-                <Button
-                  icon={idea.archivedAt ? <RotateCcw /> : <Archive />}
-                  onClick={() => changeIdeaLifecycle.mutate(idea)}
-                  variant="quiet"
-                >
-                  {idea.archivedAt ? "Restore" : "Archive"}
-                </Button>
-                {idea.projectId ? (
-                  <Button onClick={() => void navigate(`/projects/${idea.projectId}/overview`)}>
-                    Open production
+              {canEdit ? (
+                <footer>
+                  <Button icon={<Pencil />} onClick={() => setIdeaEditor(idea)} variant="quiet">
+                    Edit
                   </Button>
-                ) : !idea.archivedAt ? (
                   <Button
-                    icon={<ArrowRight />}
-                    onClick={() => setPromoteIdea(idea)}
-                    variant="primary"
+                    icon={idea.archivedAt ? <RotateCcw /> : <Trash2 />}
+                    onClick={() => {
+                      if (idea.archivedAt) changeIdeaLifecycle.mutate(idea);
+                      else setIdeaToDelete(idea);
+                    }}
+                    variant="quiet"
                   >
-                    Promote
+                    {idea.archivedAt ? "Restore" : "Delete"}
                   </Button>
-                ) : null}
-              </footer>
+                  {idea.projectId ? (
+                    <Button onClick={() => void navigate(`/projects/${idea.projectId}/overview`)}>
+                      Open production
+                    </Button>
+                  ) : !idea.archivedAt ? (
+                    <Button
+                      icon={<ArrowRight />}
+                      onClick={() => setPromoteIdea(idea)}
+                      variant="primary"
+                    >
+                      Promote
+                    </Button>
+                  ) : null}
+                </footer>
+              ) : null}
             </article>
           ))}
         </div>
       ) : (
         <SurfaceBoundary
           action={
-            directoryState === "active" ? (
+            canEdit && directoryState === "active" ? (
               <Button icon={<Plus />} onClick={() => setIdeaEditor("new")} variant="primary">
                 Capture first idea
               </Button>
@@ -388,9 +433,60 @@ export function ProjectListPage() {
           }
           description="Ideas keep their source, notes, references, and history when promoted."
           state="empty"
-          title={directoryState === "active" ? "The idea inbox is clear" : "No archived ideas"}
+          title={directoryState === "active" ? "The idea inbox is clear" : "No deleted ideas"}
         />
       )}
+      {projectToDelete ? (
+        <DialogScrim label="Cancel project deletion" onClose={() => setProjectToDelete(undefined)}>
+          <div aria-labelledby="delete-project-title" className="form-dialog">
+            <header>
+              <h2 id="delete-project-title">Delete “{projectToDelete.title}”?</h2>
+              <p>
+                The production moves to Deleted productions. Its screenplay and linked work stay
+                intact and can be restored.
+              </p>
+            </header>
+            <MutationError active={changeProjectLifecycle.isError} />
+            <footer>
+              <Button onClick={() => setProjectToDelete(undefined)} variant="quiet">
+                Keep project
+              </Button>
+              <Button
+                disabled={changeProjectLifecycle.isPending}
+                icon={<Trash2 />}
+                onClick={() => changeProjectLifecycle.mutate(projectToDelete)}
+                variant="primary"
+              >
+                Delete project
+              </Button>
+            </footer>
+          </div>
+        </DialogScrim>
+      ) : null}
+      {ideaToDelete ? (
+        <DialogScrim label="Cancel idea deletion" onClose={() => setIdeaToDelete(undefined)}>
+          <div aria-labelledby="delete-idea-title" className="form-dialog">
+            <header>
+              <h2 id="delete-idea-title">Delete “{ideaToDelete.title}”?</h2>
+              <p>The idea moves to Deleted ideas and can be restored later.</p>
+            </header>
+            <MutationError active={changeIdeaLifecycle.isError} />
+            <footer>
+              <Button onClick={() => setIdeaToDelete(undefined)} variant="quiet">
+                Keep idea
+              </Button>
+              <Button
+                disabled={changeIdeaLifecycle.isPending}
+                icon={<Trash2 />}
+                onClick={() => changeIdeaLifecycle.mutate(ideaToDelete)}
+                variant="primary"
+              >
+                Delete idea
+              </Button>
+            </footer>
+          </div>
+        </DialogScrim>
+      ) : null}
       {createOpen ? (
         <DialogScrim label="Cancel project creation" onClose={() => setCreateOpen(false)}>
           <form

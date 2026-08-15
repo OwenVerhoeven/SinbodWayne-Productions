@@ -72,7 +72,7 @@ const screenplaySchema = z.object({
       synopsis: z.string().nullable(),
       pageEighths: z.number(),
       omitted: z.boolean(),
-      syncState: z.enum(["synced", "revised", "added", "ambiguous", "removed"]),
+      syncState: z.enum(["synced", "matched", "revised", "moved", "added", "ambiguous", "removed"]),
     }),
   ),
   blocks: z.array(
@@ -146,6 +146,7 @@ export function ProfessionalScreenplayPage() {
   const [baseVersion, setBaseVersion] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [conflict, setConflict] = useState<ApiError>();
+  const [operationError, setOperationError] = useState<string>();
   const [reviewTab, setReviewTab] = useState<ReviewTab>("notes");
   const [findOpen, setFindOpen] = useState(false);
   const [findText, setFindText] = useState("");
@@ -178,10 +179,13 @@ export function ProfessionalScreenplayPage() {
       setConflict(undefined);
       setBaseVersion(data.version);
       setDraftBlocks(data.blocks);
+      setOperationError(undefined);
       queryClient.setQueryData(["screenplay", projectId], data);
+      void queryClient.invalidateQueries({ queryKey: ["creative-progress", projectId] });
     },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) setConflict(error);
+      else setOperationError(messageFor(error, "The screenplay could not be saved."));
     },
   });
 
@@ -220,10 +224,12 @@ export function ProfessionalScreenplayPage() {
         { method: "POST" },
       ),
     onSuccess: async (value) => {
+      setOperationError(undefined);
       setSelectedSceneId(value.sceneId);
       await queryClient.invalidateQueries({ queryKey: ["screenplay", projectId] });
       window.setTimeout(() => scrollToScene(value.sceneId), 100);
     },
+    onError: (error) => setOperationError(messageFor(error, "The scene could not be added.")),
   });
 
   const addBlock = useMutation({
@@ -234,10 +240,12 @@ export function ProfessionalScreenplayPage() {
         { method: "POST", body: jsonBody(input) },
       ),
     onSuccess: async (value) => {
+      setOperationError(undefined);
       setSelectedBlockId(value.blockId);
       await queryClient.invalidateQueries({ queryKey: ["screenplay", projectId] });
       window.setTimeout(() => blockRefs.current.get(value.blockId)?.focus(), 100);
     },
+    onError: (error) => setOperationError(messageFor(error, "The element could not be added.")),
   });
 
   const deleteBlock = useMutation({
@@ -247,7 +255,14 @@ export function ProfessionalScreenplayPage() {
         z.object({ deleted: z.literal(true) }),
         { method: "DELETE" },
       ),
-    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["screenplay", projectId] }),
+    onSuccess: async () => {
+      setOperationError(undefined);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["screenplay", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["creative-progress", projectId] }),
+      ]);
+    },
+    onError: (error) => setOperationError(messageFor(error, "The element could not be deleted.")),
   });
 
   const createRevision = useMutation({
@@ -342,8 +357,13 @@ export function ProfessionalScreenplayPage() {
 
   async function addElement(sceneId: string, type: BlockType, afterBlockId?: string) {
     if (!canEdit || conflict) return;
-    if (dirty) await saveDraft.mutateAsync();
-    await addBlock.mutateAsync({ sceneId, type, ...(afterBlockId ? { afterBlockId } : {}) });
+    try {
+      if (dirty) await saveDraft.mutateAsync();
+      await addBlock.mutateAsync({ sceneId, type, ...(afterBlockId ? { afterBlockId } : {}) });
+    } catch {
+      // Mutation callbacks keep the recoverable error on-screen. Swallow the
+      // rejected promise here so keyboard insertion cannot trigger a runtime overlay.
+    }
   }
 
   function selectScene(sceneId: string) {
@@ -377,12 +397,20 @@ export function ProfessionalScreenplayPage() {
     if (!file || !canEdit) return;
     const body = new FormData();
     body.set("file", file);
-    await apiRequest(
-      `/api/v1/app/projects/${encodeURIComponent(projectId ?? "")}/screenplay/import`,
-      z.object({ imported: z.literal(true), warnings: z.array(z.string()) }),
-      { method: "POST", body },
-    );
-    await queryClient.invalidateQueries({ queryKey: ["screenplay", projectId] });
+    try {
+      await apiRequest(
+        `/api/v1/app/projects/${encodeURIComponent(projectId ?? "")}/screenplay/import`,
+        z.object({ imported: z.literal(true), warnings: z.array(z.string()) }),
+        { method: "POST", body },
+      );
+      setOperationError(undefined);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["screenplay", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["creative-progress", projectId] }),
+      ]);
+    } catch (error) {
+      setOperationError(messageFor(error, "The screenplay import could not be completed."));
+    }
   }
 
   return (
@@ -436,6 +464,7 @@ export function ProfessionalScreenplayPage() {
             ) : null}
           </>
         }
+        creativeModule="screenplay"
         project={activeProject}
         section="Writing"
         title="Screenplay"
@@ -583,6 +612,15 @@ export function ProfessionalScreenplayPage() {
                   variant="secondary"
                 >
                   Load server version
+                </Button>
+              </div>
+            ) : null}
+            {operationError ? (
+              <div className="conflict-banner" role="alert">
+                <AlertTriangle aria-hidden="true" />
+                <span>{operationError}</span>
+                <Button onClick={() => setOperationError(undefined)} variant="quiet">
+                  Dismiss
                 </Button>
               </div>
             ) : null}
@@ -1018,6 +1056,10 @@ function scrollToScene(sceneId: string) {
 
 function wordsIn(value: string): number {
   return value.trim() ? value.trim().split(/\s+/u).length : 0;
+}
+
+function messageFor(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function titleCase(value: string): string {

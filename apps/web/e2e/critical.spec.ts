@@ -58,6 +58,18 @@ test("the project is a focused four-tool creative studio", async ({ page }) => {
 test("ideas, story and screenplay provide usable authoring workflows", async ({ page }) => {
   await signIn(page);
 
+  await expectPage(page, "overview", "Project Overview");
+  await expect(page.getByText("In progress", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mark complete", exact: true })).toBeVisible();
+  await page
+    .locator(".sidebar__nav")
+    .getByRole("link", { name: "Screenplay", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Screenplay", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Unexpected Application Error!" })).toHaveCount(0);
+
   await expectPage(page, "ideas", "Idea Box");
   const capturedIdea = `A station clock starts running backwards ${Date.now()}`;
   await page.getByRole("textbox", { name: "Capture a new idea", exact: true }).fill(capturedIdea);
@@ -93,6 +105,7 @@ test("a viewer can open all four tools but cannot alter creative work", async ({
   await signIn(page, "TestViewer", "test-only-viewer-passphrase");
   await expectPage(page, "overview", "Project Overview");
   await expect(page.getByText("View-only account", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mark complete", exact: true })).toHaveCount(0);
 
   await expectPage(page, "ideas", "Idea Box");
   await expect(page.getByRole("button", { name: "Add to box" })).toHaveCount(0);
@@ -106,4 +119,27 @@ test("a viewer can open all four tools but cannot alter creative work", async ({
   await expect(page.getByRole("button", { name: "Import", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create revision", exact: true })).toHaveCount(0);
   await expect(page.locator(".screenplay-line textarea").first()).toBeDisabled();
+});
+
+test("an editor can delete and recover a project", async ({ page }) => {
+  await signIn(page);
+  const title = `Recoverable project ${Date.now()}`;
+  const code = `DEL${String(Date.now()).slice(-8)}`;
+
+  await page.getByRole("button", { name: "New production", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill(title);
+  await page.getByLabel("Project code", { exact: true }).fill(code);
+  await page.getByRole("button", { name: "Create production", exact: true }).click();
+
+  const row = page.getByRole("row", { name: new RegExp(title, "u") });
+  await expect(row.getByText("Just started", { exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: "Delete project", exact: true }).click();
+  await expect(row).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Deleted projects", exact: true }).click();
+  const deletedRow = page.getByRole("row", { name: new RegExp(title, "u") });
+  await expect(deletedRow).toBeVisible();
+  await deletedRow.getByRole("button", { name: "Restore", exact: true }).click();
+  await expect(deletedRow).toHaveCount(0);
 });

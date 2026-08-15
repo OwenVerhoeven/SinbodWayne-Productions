@@ -54,6 +54,7 @@ export async function assertProjectAccess(
   actor: ActorContext,
   projectId: string,
   access: "view" | "edit" = "view",
+  allowArchivedEdit = false,
 ): Promise<void> {
   const row = await db
     .prepare(
@@ -67,6 +68,6 @@ export async function assertProjectAccess(
     .first<{ status: string; archived_at: number | null }>();
   if (!row || row.status !== "active")
     throw new HttpError(404, "not_found", "The requested project was not found.");
-  if (access === "edit" && row.archived_at !== null)
+  if (access === "edit" && row.archived_at !== null && !allowArchivedEdit)
     throw new HttpError(409, "record_archived", "Restore the project before editing it.");
 }

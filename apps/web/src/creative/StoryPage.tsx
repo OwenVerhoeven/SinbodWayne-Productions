@@ -11,8 +11,10 @@ import {
   Minus,
   Plus,
   Save,
+  Trash2,
 } from "lucide-react";
 import { useOutletContext, useParams } from "react-router";
+import { z } from "zod";
 import { Button, IconButton, Status, SurfaceBoundary } from "@swp/ui";
 
 import { ApiError, apiRequest, jsonBody } from "../api/client";
@@ -31,6 +33,7 @@ const compassFields = [
   { key: "ending", label: "Ending", prompt: "What changes by the final image?" },
   { key: "theme", label: "Theme", prompt: "What question should linger?" },
 ] as const;
+const changedSchema = z.object({ changed: z.literal(true) });
 
 interface StoryDraft {
   title: string;
@@ -52,6 +55,7 @@ export function StoryPage() {
   const [focusMode, setFocusMode] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [conflict, setConflict] = useState<string>();
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const endpoint = `/api/v1/app/projects/${encodeURIComponent(projectId ?? "")}/records/development_document`;
 
   const documents = useQuery({
@@ -129,6 +133,7 @@ export function StoryPage() {
           };
         },
       );
+      void queryClient.invalidateQueries({ queryKey: ["creative-progress", projectId] });
     },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
@@ -139,6 +144,29 @@ export function StoryPage() {
         setConflict(error instanceof Error ? error.message : "The story could not be saved.");
       }
     },
+  });
+
+  const deleteStory = useMutation({
+    mutationFn: (record: DomainRecord) =>
+      apiRequest(`${endpoint}/${encodeURIComponent(record.id)}/archive`, changedSchema, {
+        method: "POST",
+        headers: { "If-Match": `"${record.version}"` },
+      }),
+    onSuccess: async () => {
+      setBaseRecord(undefined);
+      setDraft(undefined);
+      setDirty(false);
+      setConflict(undefined);
+      setDeleteOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["records", projectId, "development_document"],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["creative-progress", projectId] }),
+      ]);
+    },
+    onError: (error) =>
+      setConflict(error instanceof Error ? error.message : "The story could not be deleted."),
   });
 
   useEffect(() => {
@@ -200,7 +228,12 @@ export function StoryPage() {
 
   return (
     <section className={`project-page story-page${focusMode ? " story-page--focus" : ""}`}>
-      <ProjectContextHeader project={activeProject} section="Development" title="The Story" />
+      <ProjectContextHeader
+        creativeModule="story"
+        project={activeProject}
+        section="Development"
+        title="The Story"
+      />
       {documents.isLoading ? (
         <SurfaceBoundary state="loading" />
       ) : documents.isError ? (
@@ -315,14 +348,24 @@ export function StoryPage() {
                 <Focus />
               </IconButton>
               {canEdit ? (
-                <Button
-                  disabled={!dirty || saveStory.isPending}
-                  icon={<Save />}
-                  onClick={() => saveStory.mutate({ record: baseRecord, next: draft })}
-                  variant="quiet"
-                >
-                  Save
-                </Button>
+                <>
+                  <Button
+                    disabled={!dirty || saveStory.isPending}
+                    icon={<Save />}
+                    onClick={() => saveStory.mutate({ record: baseRecord, next: draft })}
+                    variant="quiet"
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    disabled={dirty || saveStory.isPending || deleteStory.isPending}
+                    icon={<Trash2 />}
+                    onClick={() => setDeleteOpen(true)}
+                    variant="quiet"
+                  >
+                    Delete story
+                  </Button>
+                </>
               ) : null}
             </div>
             {conflict ? (
@@ -396,6 +439,42 @@ export function StoryPage() {
           </aside>
         </div>
       )}
+      {deleteOpen && baseRecord ? (
+        <div className="dialog-layer">
+          <button
+            aria-label="Cancel story deletion"
+            className="dialog-layer__scrim"
+            onClick={() => setDeleteOpen(false)}
+            type="button"
+          />
+          <div aria-labelledby="delete-story-title" aria-modal="true" role="dialog">
+            <div className="form-dialog">
+              <header>
+                <h2 id="delete-story-title">Delete this story document?</h2>
+                <p>The document leaves the writing desk but remains recoverable in history.</p>
+              </header>
+              {deleteStory.isError ? (
+                <p className="form-error" role="alert">
+                  The story could not be deleted. Refresh and try again.
+                </p>
+              ) : null}
+              <footer>
+                <Button onClick={() => setDeleteOpen(false)} variant="quiet">
+                  Keep story
+                </Button>
+                <Button
+                  disabled={deleteStory.isPending}
+                  icon={<Trash2 />}
+                  onClick={() => deleteStory.mutate(baseRecord)}
+                  variant="primary"
+                >
+                  Delete story
+                </Button>
+              </footer>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

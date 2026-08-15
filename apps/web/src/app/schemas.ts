@@ -10,6 +10,7 @@ export const projectSchema = z.object({
   status: z.string(),
   readinessState: z.string(),
   readinessScore: z.number(),
+  creativeStatus: z.enum(["just_started", "in_progress", "writing_completed"]),
   timezone: z.string(),
   updatedAt: z.number(),
   version: z.number(),

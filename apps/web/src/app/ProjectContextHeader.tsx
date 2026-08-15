@@ -1,21 +1,41 @@
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link } from "react-router";
 import { ChevronRight } from "lucide-react";
-import { Status } from "@swp/ui";
+import { Button, Status } from "@swp/ui";
 
 import type { ProjectSummary } from "./schemas";
+import { useAuth } from "../auth/auth-context";
+import {
+  creativeStatusLabel,
+  creativeStatusTone,
+  type CreativeModule,
+  useCreativeProgress,
+  useToggleCreativeCompletion,
+} from "../creative/creative-progress";
 
 export function ProjectContextHeader({
   actions,
+  creativeModule,
   project,
   section,
   title,
 }: {
   readonly actions?: ReactNode;
+  readonly creativeModule?: CreativeModule;
   readonly project: ProjectSummary;
   readonly section: string;
   readonly title: string;
 }) {
+  const auth = useAuth();
+  const progress = useCreativeProgress(creativeModule ? project.id : undefined);
+  const completion = useToggleCreativeCompletion(project.id);
+  const moduleProgress = progress.data?.modules.find((module) => module.key === creativeModule);
+  const displayedStatus =
+    creativeModule === "overview"
+      ? (progress.data?.projectStatus ?? project.creativeStatus)
+      : moduleProgress?.status;
+  const canEdit = auth.account?.role !== "viewer";
+
   return (
     <>
       <header className="project-header">
@@ -29,37 +49,59 @@ export function ProjectContextHeader({
           </nav>
           <div className="project-header__title">
             <h1>{title}</h1>
-            <Status
-              tone={
-                project.readinessState === "ready"
-                  ? "success"
-                  : project.readinessState === "stale"
-                    ? "warning"
-                    : "danger"
-              }
-            >
-              {project.readinessState.replaceAll("_", " ")}
-            </Status>
+            {displayedStatus ? (
+              <Status tone={creativeStatusTone(displayedStatus)}>
+                {creativeStatusLabel(displayedStatus)}
+              </Status>
+            ) : null}
           </div>
           <p>
             {project.title} · {project.phase}
           </p>
         </div>
-        {actions ? <div className="project-header__actions">{actions}</div> : null}
+        {actions || (creativeModule && moduleProgress && canEdit) ? (
+          <div className="project-header__actions">
+            {actions}
+            {creativeModule && moduleProgress && canEdit ? (
+              <Button
+                disabled={completion.isPending}
+                onClick={() =>
+                  completion.mutate({
+                    moduleKey: creativeModule,
+                    completed: !moduleProgress.completed,
+                    version: progress.data?.version ?? project.version,
+                  })
+                }
+                variant={moduleProgress.completed ? "quiet" : "primary"}
+              >
+                {moduleProgress.completed ? "Undo completion" : "Mark complete"}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </header>
-      <ProjectPulseBar project={project} />
+      <ProjectPulseBar project={project} writingStatus={progress.data?.projectStatus} />
+      {completion.isError ? (
+        <div className="conflict-banner" role="alert">
+          The writing status changed elsewhere. Refresh the project and try again.
+        </div>
+      ) : null}
     </>
   );
 }
 
-function ProjectPulseBar({ project }: { readonly project: ProjectSummary }) {
-  const { moduleKey } = useParams();
+function ProjectPulseBar({
+  project,
+  writingStatus,
+}: {
+  readonly project: ProjectSummary;
+  readonly writingStatus: string | undefined;
+}) {
   const values = [
-    ["Readiness", `${Math.round(project.readinessScore)}%`],
+    ["Writing", creativeStatusLabel(writingStatus ?? project.creativeStatus)],
     ["Phase", project.phase],
     ["Status", project.status],
     ["Timezone", project.timezone],
-    ["Current view", moduleKey?.replaceAll("-", " ") ?? "Overview"],
   ];
   return (
     <dl className="project-pulse">

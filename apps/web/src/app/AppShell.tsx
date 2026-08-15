@@ -21,6 +21,11 @@ import { projectListSchema, type ProjectSummary } from "./schemas";
 import { CommandPalette } from "./CommandPalette";
 import { NotificationDrawer } from "./NotificationDrawer";
 import { useOfflineDrafts } from "../offline/useOfflineDrafts";
+import {
+  creativeStatusLabel,
+  creativeStatusTone,
+  useCreativeProgress,
+} from "../creative/creative-progress";
 
 export function AppShell() {
   const auth = useAuth();
@@ -44,6 +49,7 @@ export function AppShell() {
     () => projects.data?.items.find((project) => project.id === projectId),
     [projectId, projects.data?.items],
   );
+  const creativeProgress = useCreativeProgress(activeProject?.id);
 
   useEffect(() => {
     setMobileOpen(false);
@@ -170,15 +176,13 @@ export function AppShell() {
           <div className="topbar__phase">
             <span>{activeProject.phase}</span>
             <Status
-              tone={
-                activeProject.readinessState === "ready"
-                  ? "success"
-                  : activeProject.readinessState === "stale"
-                    ? "warning"
-                    : "danger"
-              }
+              tone={creativeStatusTone(
+                creativeProgress.data?.projectStatus ?? activeProject.creativeStatus,
+              )}
             >
-              {activeProject.readinessState.replaceAll("_", " ")}
+              {creativeStatusLabel(
+                creativeProgress.data?.projectStatus ?? activeProject.creativeStatus,
+              )}
             </Status>
           </div>
         ) : null}

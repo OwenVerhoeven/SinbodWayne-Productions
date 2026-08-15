@@ -9,6 +9,11 @@ import type { AppOutletContext } from "../app/AppShell";
 import { domainRecordListSchema } from "../app/schemas";
 import { ProjectContextHeader } from "../app/ProjectContextHeader";
 import { countWords, detailText, formatRelativeTime } from "../creative/record-utils";
+import {
+  creativeStatusLabel,
+  creativeStatusTone,
+  useCreativeProgress,
+} from "../creative/creative-progress";
 
 const screenplaySummarySchema = z.object({
   id: z.string(),
@@ -37,13 +42,14 @@ export function ProjectOverviewPage() {
   });
   const screenplay = useQuery({
     enabled: Boolean(projectId),
-    queryKey: ["screenplay", projectId],
+    queryKey: ["screenplay-summary", projectId],
     queryFn: () =>
       apiRequest(
         `/api/v1/app/projects/${encodeURIComponent(projectId ?? "")}/screenplay`,
         screenplaySummarySchema,
       ),
   });
+  const progress = useCreativeProgress(projectId);
 
   if (!activeProject) return <SurfaceBoundary state="error" title="Project not found" />;
 
@@ -60,10 +66,13 @@ export function ProjectOverviewPage() {
       (total, scene) => total + (scene.omitted ? 0 : scene.pageEighths),
       0,
     ) ?? 0;
+  const moduleStatus = (key: "idea_box" | "story" | "screenplay") =>
+    progress.data?.modules.find((module) => module.key === key)?.status ?? "not_yet_started";
 
   return (
     <section className="project-page focused-overview">
       <ProjectContextHeader
+        creativeModule="overview"
         project={activeProject}
         section="Creative studio"
         title="Project Overview"
@@ -111,6 +120,14 @@ export function ProjectOverviewPage() {
             </div>
             <dl>
               <div>
+                <dt>Status</dt>
+                <dd>
+                  <Status tone={creativeStatusTone(moduleStatus("idea_box"))}>
+                    {creativeStatusLabel(moduleStatus("idea_box"))}
+                  </Status>
+                </dd>
+              </div>
+              <div>
                 <dt>Ideas</dt>
                 <dd>{rankedIdeas.length}</dd>
               </div>
@@ -149,8 +166,8 @@ export function ProjectOverviewPage() {
               <div>
                 <dt>Status</dt>
                 <dd>
-                  <Status tone={story?.status === "approved" ? "success" : "neutral"}>
-                    {story?.status.replaceAll("_", " ") ?? "Not started"}
+                  <Status tone={creativeStatusTone(moduleStatus("story"))}>
+                    {creativeStatusLabel(moduleStatus("story"))}
                   </Status>
                 </dd>
               </div>
@@ -186,6 +203,14 @@ export function ProjectOverviewPage() {
               </p>
             </div>
             <dl>
+              <div>
+                <dt>Status</dt>
+                <dd>
+                  <Status tone={creativeStatusTone(moduleStatus("screenplay"))}>
+                    {creativeStatusLabel(moduleStatus("screenplay"))}
+                  </Status>
+                </dd>
+              </div>
               <div>
                 <dt>Scenes</dt>
                 <dd>{screenplay.data?.scenes.length ?? 0}</dd>

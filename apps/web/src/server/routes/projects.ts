@@ -63,6 +63,11 @@ const projectPatchSchema = z
   })
   .strict();
 
+const creativeModuleSchema = z.enum(["overview", "idea_box", "story", "screenplay"]);
+const creativeCompletionSchema = z.object({ completed: z.boolean() }).strict();
+
+type CreativeModule = z.infer<typeof creativeModuleSchema>;
+
 interface ProjectRow {
   readonly id: string;
   readonly code: string;
@@ -73,11 +78,43 @@ interface ProjectRow {
   readonly status: string;
   readonly readiness_state: string;
   readonly readiness_score: number;
+  readonly creative_status: string;
   readonly timezone: string;
   readonly updated_at: number;
   readonly version: number;
   readonly archived_at: number | null;
 }
+
+const creativeStatusSelect = `CASE
+  WHEN COALESCE(json_extract(p.enabled_modules_json, '$.creativeCompletion.overview'), 0) = 1
+   AND COALESCE(json_extract(p.enabled_modules_json, '$.creativeCompletion.idea_box'), 0) = 1
+   AND COALESCE(json_extract(p.enabled_modules_json, '$.creativeCompletion.story'), 0) = 1
+   AND COALESCE(json_extract(p.enabled_modules_json, '$.creativeCompletion.screenplay'), 0) = 1
+    THEN 'writing_completed'
+  WHEN COALESCE(json_extract(p.enabled_modules_json, '$.creativeCompletion.overview'), 0) = 1
+    OR COALESCE(json_extract(p.enabled_modules_json, '$.creativeCompletion.idea_box'), 0) = 1
+    OR COALESCE(json_extract(p.enabled_modules_json, '$.creativeCompletion.story'), 0) = 1
+    OR COALESCE(json_extract(p.enabled_modules_json, '$.creativeCompletion.screenplay'), 0) = 1
+    OR EXISTS (
+      SELECT 1 FROM ideas i
+       WHERE i.workspace_id = p.workspace_id AND i.project_id = p.id AND i.archived_at IS NULL
+    )
+    OR EXISTS (
+      SELECT 1 FROM development_documents d
+       WHERE d.workspace_id = p.workspace_id AND d.project_id = p.id
+         AND d.document_type = 'story' AND d.archived_at IS NULL
+         AND (${storyContentSql("d")})
+    )
+    OR EXISTS (
+      SELECT 1 FROM screenplays sp
+      JOIN script_draft_blocks b ON b.screenplay_id = sp.id AND b.draft_id = sp.current_draft_id
+       WHERE sp.workspace_id = p.workspace_id AND sp.project_id = p.id
+         AND sp.archived_at IS NULL AND b.archived_at IS NULL
+         AND trim(b.text_content) <> ''
+    )
+    THEN 'in_progress'
+  ELSE 'just_started'
+END AS creative_status`;
 
 export const projectRoutes = new Hono<AppEnv>();
 projectRoutes.use("*", requireActor);
@@ -103,7 +140,8 @@ projectRoutes.get("/", async (context) => {
         : "";
   const result = await context.env.DB.prepare(
     `SELECT p.id, p.code, p.title, p.working_title, p.type, p.phase, p.status,
-            p.readiness_state, p.readiness_score, p.timezone, p.updated_at, p.version, p.archived_at
+            p.readiness_state, p.readiness_score, ${creativeStatusSelect},
+            p.timezone, p.updated_at, p.version, p.archived_at
        FROM projects p
        JOIN project_memberships pm ON pm.project_id = p.id AND pm.user_id = ?1 AND pm.status = 'active'
       WHERE p.workspace_id = ?2
@@ -243,7 +281,7 @@ projectRoutes.get("/:projectId/settings", async (context) => {
   const projectId = context.req.param("projectId");
   await assertProjectAccess(context.env.DB, actor, projectId);
   const project = await context.env.DB.prepare(
-    `SELECT p.*, EXISTS(SELECT 1 FROM legal_holds lh WHERE lh.project_id = p.id AND lh.released_at IS NULL) AS legal_hold
+    `SELECT p.*, ${creativeStatusSelect}, EXISTS(SELECT 1 FROM legal_holds lh WHERE lh.project_id = p.id AND lh.released_at IS NULL) AS legal_hold
        FROM projects p WHERE p.id = ?1 AND p.workspace_id = ?2 LIMIT 1`,
   )
     .bind(projectId, actor.workspaceId)
@@ -317,6 +355,78 @@ projectRoutes.get("/:projectId/settings", async (context) => {
       },
     ],
   });
+});
+
+projectRoutes.get("/:projectId/creative-progress", async (context) => {
+  const actor = context.get("actor");
+  const projectId = context.req.param("projectId");
+  await assertProjectAccess(context.env.DB, actor, projectId);
+  return ok(context, await creativeProgressView(context.env.DB, actor.workspaceId, projectId));
+});
+
+projectRoutes.use("/:projectId/creative-progress/:moduleKey", requireJson);
+projectRoutes.patch("/:projectId/creative-progress/:moduleKey", async (context) => {
+  const actor = context.get("actor");
+  const projectId = context.req.param("projectId");
+  const moduleKey = creativeModuleSchema.parse(context.req.param("moduleKey"));
+  await assertProjectAccess(context.env.DB, actor, projectId, "edit");
+  const expected = parseIfMatch(context.req.header("If-Match"));
+  const input = creativeCompletionSchema.parse(await context.req.json());
+  const current = await context.env.DB.prepare(
+    "SELECT enabled_modules_json, version FROM projects WHERE id = ?1 AND workspace_id = ?2 LIMIT 1",
+  )
+    .bind(projectId, actor.workspaceId)
+    .first<{ enabled_modules_json: string; version: number }>();
+  if (!current) throw new HttpError(404, "not_found", "The requested project was not found.");
+  if (current.version !== expected) {
+    throw new HttpError(409, "version_conflict", "The project changed in another session.", {
+      expectedVersion: expected,
+      current: await creativeProgressView(context.env.DB, actor.workspaceId, projectId),
+    });
+  }
+  const settings = parseProjectModuleSettings(current.enabled_modules_json);
+  settings.creativeCompletion[moduleKey] = input.completed;
+  const guard = versionGuard(
+    context.env.DB,
+    "projects",
+    projectId,
+    actor.workspaceId,
+    undefined,
+    expected,
+  );
+  const now = Date.now();
+  try {
+    await context.env.DB.batch([
+      guard.insert,
+      context.env.DB.prepare(
+        "UPDATE projects SET enabled_modules_json = ?1, version = version + 1, updated_at = ?2 WHERE id = ?3 AND workspace_id = ?4",
+      ).bind(JSON.stringify(settings), now, projectId, actor.workspaceId),
+      auditStatement(context.env.DB, {
+        workspaceId: actor.workspaceId,
+        projectId,
+        actor,
+        action: input.completed ? "creative_module.completed" : "creative_module.reopened",
+        objectType: "project",
+        objectId: projectId,
+        requestId: context.get("requestId"),
+        occurredAt: now,
+        details: { moduleKey },
+      }),
+      guard.remove,
+    ]);
+  } catch (error) {
+    if (isConstraintError(error)) {
+      throw await projectConflict(
+        context.env.DB,
+        actor.userId,
+        actor.workspaceId,
+        projectId,
+        expected,
+      );
+    }
+    throw error;
+  }
+  return ok(context, await creativeProgressView(context.env.DB, actor.workspaceId, projectId));
 });
 
 projectRoutes.use("/:projectId", requireJson);
@@ -395,12 +505,7 @@ for (const action of ["archive", "restore"] as const) {
     const actor = context.get("actor");
     const projectId = context.req.param("projectId");
     if (!projectId) throw new HttpError(404, "not_found", "The project was not found.");
-    await assertProjectAccess(
-      context.env.DB,
-      actor,
-      projectId,
-      action === "archive" ? "edit" : "view",
-    );
+    await assertProjectAccess(context.env.DB, actor, projectId, "edit", action === "restore");
     const expected = parseIfMatch(context.req.header("If-Match"));
     const current = await context.env.DB.prepare(
       "SELECT archived_at FROM projects WHERE id = ?1 AND workspace_id = ?2 LIMIT 1",
@@ -480,7 +585,7 @@ async function getProject(
 ): Promise<ProjectRow | null> {
   return db
     .prepare(
-      `SELECT p.id, p.code, p.title, p.working_title, p.type, p.phase, p.status, p.readiness_state, p.readiness_score, p.timezone, p.updated_at, p.version, p.archived_at
+      `SELECT p.id, p.code, p.title, p.working_title, p.type, p.phase, p.status, p.readiness_state, p.readiness_score, ${creativeStatusSelect}, p.timezone, p.updated_at, p.version, p.archived_at
        FROM projects p JOIN project_memberships pm ON pm.project_id = p.id AND pm.user_id = ?1 AND pm.status = 'active'
       WHERE p.id = ?2 AND p.workspace_id = ?3 LIMIT 1`,
     )
@@ -499,6 +604,7 @@ function projectView(row: ProjectRow) {
     status: row.status,
     readinessState: row.readiness_state,
     readinessScore: row.readiness_score,
+    creativeStatus: row.creative_status,
     timezone: row.timezone,
     updatedAt: row.updated_at,
     version: row.version,
@@ -517,6 +623,7 @@ function projectViewFromUnknown(row: Record<string, unknown>) {
     status: String(row.status),
     readinessState: String(row.readiness_state),
     readinessScore: Number(row.readiness_score),
+    creativeStatus: String(row.creative_status ?? "just_started"),
     timezone: String(row.timezone),
     updatedAt: Number(row.updated_at),
     version: Number(row.version),
@@ -542,10 +649,140 @@ function parseStringArray(value: unknown): string[] {
   if (typeof value !== "string") return [];
   try {
     const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : [];
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) return parsed;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const enabled = (parsed as { enabled?: unknown }).enabled;
+      return Array.isArray(enabled) && enabled.every((item) => typeof item === "string")
+        ? enabled
+        : [];
+    }
+    return [];
   } catch {
     return [];
   }
+}
+
+function storyContentSql(alias: string): string {
+  return ["body", "premise", "protagonist", "want", "obstacle", "stakes", "ending", "theme"]
+    .map((key) => `trim(COALESCE(json_extract(${alias}.details_json, '$.${key}'), '')) <> ''`)
+    .join(" OR ");
+}
+
+function parseProjectModuleSettings(value: string): {
+  enabled: string[];
+  creativeCompletion: Record<CreativeModule, boolean>;
+} {
+  const fallback = {
+    enabled: [] as string[],
+    creativeCompletion: {
+      overview: false,
+      idea_box: false,
+      story: false,
+      screenplay: false,
+    },
+  };
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return {
+        ...fallback,
+        enabled: parsed.filter((item): item is string => typeof item === "string"),
+      };
+    }
+    if (!parsed || typeof parsed !== "object") return fallback;
+    const object = parsed as { enabled?: unknown; creativeCompletion?: unknown };
+    const completion =
+      object.creativeCompletion && typeof object.creativeCompletion === "object"
+        ? (object.creativeCompletion as Record<string, unknown>)
+        : {};
+    return {
+      enabled: Array.isArray(object.enabled)
+        ? object.enabled.filter((item): item is string => typeof item === "string")
+        : [],
+      creativeCompletion: {
+        overview: completion.overview === true,
+        idea_box: completion.idea_box === true,
+        story: completion.story === true,
+        screenplay: completion.screenplay === true,
+      },
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+async function creativeProgressView(db: D1Database, workspaceId: string, projectId: string) {
+  const [project, ideaCount, storyCount, screenplayCount] = await Promise.all([
+    db
+      .prepare(
+        "SELECT enabled_modules_json, version, working_title, logline, format, target_runtime_ms FROM projects WHERE id = ?1 AND workspace_id = ?2 LIMIT 1",
+      )
+      .bind(projectId, workspaceId)
+      .first<{
+        enabled_modules_json: string;
+        version: number;
+        working_title: string | null;
+        logline: string | null;
+        format: string | null;
+        target_runtime_ms: number | null;
+      }>(),
+    db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM ideas WHERE workspace_id = ?1 AND project_id = ?2 AND archived_at IS NULL",
+      )
+      .bind(workspaceId, projectId)
+      .first<{ count: number }>(),
+    db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM development_documents d
+          WHERE d.workspace_id = ?1 AND d.project_id = ?2 AND d.document_type = 'story'
+            AND d.archived_at IS NULL AND (${storyContentSql("d")})`,
+      )
+      .bind(workspaceId, projectId)
+      .first<{ count: number }>(),
+    db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM screenplays sp
+          JOIN script_draft_blocks b ON b.screenplay_id = sp.id AND b.draft_id = sp.current_draft_id
+         WHERE sp.workspace_id = ?1 AND sp.project_id = ?2 AND sp.archived_at IS NULL
+           AND b.archived_at IS NULL AND trim(b.text_content) <> ''`,
+      )
+      .bind(workspaceId, projectId)
+      .first<{ count: number }>(),
+  ]);
+  if (!project) throw new HttpError(404, "not_found", "The requested project was not found.");
+  const settings = parseProjectModuleSettings(project.enabled_modules_json);
+  const hasContent: Record<CreativeModule, boolean> = {
+    overview: Boolean(
+      project.working_title?.trim() ||
+      project.logline?.trim() ||
+      project.format?.trim() ||
+      project.target_runtime_ms,
+    ),
+    idea_box: (ideaCount?.count ?? 0) > 0,
+    story: (storyCount?.count ?? 0) > 0,
+    screenplay: (screenplayCount?.count ?? 0) > 0,
+  };
+  const modules = (creativeModuleSchema.options as readonly CreativeModule[]).map((key) => ({
+    key,
+    completed: settings.creativeCompletion[key],
+    hasContent: hasContent[key],
+    status: settings.creativeCompletion[key]
+      ? ("completed" as const)
+      : hasContent[key]
+        ? ("in_progress" as const)
+        : ("not_yet_started" as const),
+  }));
+  return {
+    projectId,
+    version: project.version,
+    projectStatus: modules.every((module) => module.completed)
+      ? ("writing_completed" as const)
+      : modules.some((module) => module.hasContent || module.completed)
+        ? ("in_progress" as const)
+        : ("just_started" as const),
+    modules,
+  };
 }
 
 function isConstraintError(error: unknown): boolean {

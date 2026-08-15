@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowDown, ArrowUp, Lightbulb, Plus, Save, Search, Sparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, Lightbulb, Plus, Save, Search, Sparkles, Trash2 } from "lucide-react";
 import { useOutletContext, useParams } from "react-router";
 import { z } from "zod";
 import { Button, IconButton, Status, SurfaceBoundary } from "@swp/ui";
@@ -34,6 +34,7 @@ export function IdeaBoxPage() {
   const [selectedId, setSelectedId] = useState<string>();
   const [draft, setDraft] = useState<IdeaDraft>();
   const [error, setError] = useState<string>();
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const endpoint = `/api/v1/app/projects/${encodeURIComponent(projectId ?? "")}/records/idea`;
 
   const ideas = useQuery({
@@ -91,7 +92,11 @@ export function IdeaBoxPage() {
     onSuccess: async (created) => {
       setCapture("");
       setSelectedId(created.id);
-      await queryClient.invalidateQueries({ queryKey: ["records", projectId, "idea"] });
+      setError(undefined);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["records", projectId, "idea"] }),
+        queryClient.invalidateQueries({ queryKey: ["creative-progress", projectId] }),
+      ]);
     },
     onError: (mutationError) => setError(messageFor(mutationError)),
   });
@@ -151,7 +156,12 @@ export function IdeaBoxPage() {
       }),
     onSuccess: async () => {
       setSelectedId(undefined);
-      await queryClient.invalidateQueries({ queryKey: ["records", projectId, "idea"] });
+      setDeleteOpen(false);
+      setError(undefined);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["records", projectId, "idea"] }),
+        queryClient.invalidateQueries({ queryKey: ["creative-progress", projectId] }),
+      ]);
     },
     onError: (mutationError) => setError(messageFor(mutationError)),
   });
@@ -183,7 +193,12 @@ export function IdeaBoxPage() {
 
   return (
     <section className="project-page idea-box-page">
-      <ProjectContextHeader project={activeProject} section="Development" title="Idea Box" />
+      <ProjectContextHeader
+        creativeModule="idea_box"
+        project={activeProject}
+        section="Development"
+        title="Idea Box"
+      />
       <div className="creative-intro">
         <div>
           <p className="eyebrow">Capture before you judge</p>
@@ -407,12 +422,8 @@ export function IdeaBoxPage() {
                     >
                       Save idea
                     </Button>
-                    <Button
-                      icon={<Archive />}
-                      onClick={() => archiveIdea.mutate(selected)}
-                      variant="quiet"
-                    >
-                      Archive
+                    <Button icon={<Trash2 />} onClick={() => setDeleteOpen(true)} variant="quiet">
+                      Delete
                     </Button>
                   </footer>
                 ) : null}
@@ -431,6 +442,42 @@ export function IdeaBoxPage() {
           title="The box is open"
         />
       )}
+      {deleteOpen && selected ? (
+        <div className="dialog-layer">
+          <button
+            aria-label="Cancel idea deletion"
+            className="dialog-layer__scrim"
+            onClick={() => setDeleteOpen(false)}
+            type="button"
+          />
+          <div aria-labelledby="delete-project-idea-title" aria-modal="true" role="dialog">
+            <div className="form-dialog">
+              <header>
+                <h2 id="delete-project-idea-title">Delete “{selected.title}”?</h2>
+                <p>The idea leaves the gallery but remains recoverable in project history.</p>
+              </header>
+              {archiveIdea.isError ? (
+                <p className="form-error" role="alert">
+                  The idea could not be deleted. Refresh and try again.
+                </p>
+              ) : null}
+              <footer>
+                <Button onClick={() => setDeleteOpen(false)} variant="quiet">
+                  Keep idea
+                </Button>
+                <Button
+                  disabled={archiveIdea.isPending}
+                  icon={<Trash2 />}
+                  onClick={() => archiveIdea.mutate(selected)}
+                  variant="primary"
+                >
+                  Delete idea
+                </Button>
+              </footer>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
