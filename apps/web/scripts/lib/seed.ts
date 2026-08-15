@@ -10,7 +10,7 @@ const FIXTURE_TIME = Date.UTC(2026, 5, 15, 8, 0, 0);
 const DAY = 86_400_000;
 const encoder = new TextEncoder();
 
-export const testSeedPersistencePath = resolve(process.cwd(), ".wrangler", "test-state-v3");
+export const testSeedPersistencePath = resolve(process.cwd(), ".wrangler", "test-state-v4");
 export const localSeedPersistencePath = resolve(process.cwd(), ".wrangler", "state");
 
 export function fixtureId(label: string): string {
@@ -88,7 +88,9 @@ function seedObject(
 
 const id = fixtureId;
 const hash = fixtureHash;
-const rank = (index: number): string => `a${index.toString().padStart(4, "0")}`;
+// Canonical fixed-width ranks leave room on both sides for user reordering.
+const rank = (index: number): string =>
+  ((BigInt(index) + 1n) * 36n ** 16n).toString(36).padStart(20, "0");
 const now = FIXTURE_TIME;
 
 function commonProjectRecord(title: string, status = "active", index = 0): Record<string, string> {
@@ -121,12 +123,14 @@ function registry(table: string, domainLabel: string, objectType: string, title:
 export interface TestSeedCredentials {
   owner: Awaited<ReturnType<typeof encodePassword>>;
   producer: Awaited<ReturnType<typeof encodePassword>>;
+  viewer: Awaited<ReturnType<typeof encodePassword>>;
 }
 
 export async function createTestSeedCredentials(): Promise<TestSeedCredentials> {
   return {
     owner: await encodePassword("test-only-owner-passphrase"),
     producer: await encodePassword("test-only-producer-passphrase"),
+    viewer: await encodePassword("test-only-viewer-passphrase"),
   };
 }
 
@@ -159,6 +163,7 @@ export function buildTestSeedSql(credentials: TestSeedCredentials): string {
       username: "TestOwner",
       displayName: "Alex Example",
       role: "workspace_owner",
+      accessMode: "editor",
       credential: credentials.owner,
     },
     {
@@ -166,7 +171,16 @@ export function buildTestSeedSql(credentials: TestSeedCredentials): string {
       username: "TestProducer",
       displayName: "Robin Example",
       role: "producer",
+      accessMode: "editor",
       credential: credentials.producer,
+    },
+    {
+      label: "viewer",
+      username: "TestViewer",
+      displayName: "Crew Viewer",
+      role: "producer",
+      accessMode: "viewer",
+      credential: credentials.viewer,
     },
   ] as const;
   for (const user of testUsers) {
@@ -177,6 +191,7 @@ export function buildTestSeedSql(credentials: TestSeedCredentials): string {
         username: sqlText(user.username),
         display_name: sqlText(user.displayName),
         role: sqlText(user.role),
+        access_mode: sqlText(user.accessMode),
         status: sqlText("active"),
         current_password_credential_id: sqlText(id(`${user.label}:credential`)),
         created_at: sqlInteger(now),
@@ -436,6 +451,7 @@ export function buildTestSeedSql(credentials: TestSeedCredentials): string {
     insertOrIgnore("screenplays", {
       id: sqlText(id("screenplay")),
       ...commonProjectRecord("Night Bus to Noord", "approved", 1),
+      current_draft_id: sqlText(id("script:draft")),
       current_revision_id: sqlText(id("script:revision:2")),
       approved_revision_id: sqlText(id("script:revision:2")),
       numbering_locked: sqlInteger(1),
@@ -444,6 +460,18 @@ export function buildTestSeedSql(credentials: TestSeedCredentials): string {
       paper_size: sqlText("A4"),
       details_json: sqlJson({ source: "native", fictional: true }),
     }),
+    insertOrIgnore("script_drafts", {
+      id: sqlText(id("script:draft")),
+      workspace_id: sqlText(id("workspace")),
+      project_id: sqlText(id("project")),
+      screenplay_id: sqlText(id("screenplay")),
+      title: sqlText("Night Bus to Noord working draft"),
+      autosave_state: sqlText("saved"),
+      base_revision_id: sqlNullableText(null),
+      created_at: sqlInteger(now + 2 * DAY),
+      updated_at: sqlInteger(now + 2 * DAY),
+    }),
+    `UPDATE screenplays SET current_draft_id = '${id("script:draft")}', version = version + 1, updated_at = ${now + 2 * DAY} WHERE id = '${id("screenplay")}' AND current_draft_id IS NULL;`,
   );
   for (const revisionNumber of [1, 2]) {
     statements.push(
@@ -479,6 +507,32 @@ export function buildTestSeedSql(credentials: TestSeedCredentials): string {
     const sceneId = id(`scene:${index + 1}`);
     const blockIds = ["heading", "action", "character", "dialogue"].map((kind) =>
       id(`block:${index + 1}:${kind}`),
+    );
+    const draftContents = [
+      index === 2 ? "INT. NIGHT BUS - BACK ROW - NIGHT" : slugline,
+      synopsis,
+      index === 0 ? "MARA" : "IVO",
+      "We only carry what we are ready to remember.",
+    ];
+    ["scene_heading", "action", "character", "dialogue"].forEach((blockType, blockIndex) =>
+      statements.push(
+        insertOrIgnore("script_draft_blocks", {
+          id: sqlText(blockIds[blockIndex]!),
+          workspace_id: sqlText(id("workspace")),
+          project_id: sqlText(id("project")),
+          screenplay_id: sqlText(id("screenplay")),
+          draft_id: sqlText(id("script:draft")),
+          block_type: sqlText(blockType),
+          text_content: sqlText(draftContents[blockIndex]!),
+          attributes_json: sqlJson({
+            sceneId,
+            ...(blockIndex === 0 ? { displayNumber } : {}),
+          }),
+          sort_rank: sqlText(rank(index * 10 + blockIndex)),
+          created_at: sqlInteger(now + 2 * DAY),
+          updated_at: sqlInteger(now + 2 * DAY),
+        }),
+      ),
     );
     statements.push(
       insertOrIgnore("scenes", {

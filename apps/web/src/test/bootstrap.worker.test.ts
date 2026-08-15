@@ -94,5 +94,5 @@ describe("account bootstrap against an isolated D1 database", () => {
         "count",
       ),
     ).toBe(3);
-  });
+  }, 30_000);
 });

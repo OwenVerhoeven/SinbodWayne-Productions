@@ -137,6 +137,7 @@ describe("fictional local/test seed", () => {
     expect(sql.includes("INSERT OR IGNORE INTO archive_jobs")).toBe(true);
     expect(sql.includes("test-only-owner-passphrase")).toBe(false);
     expect(sql.includes("test-only-producer-passphrase")).toBe(false);
+    expect(sql.includes("test-only-viewer-passphrase")).toBe(false);
     expect(buildTestSeedSql(credentials) === sql).toBe(true);
   }, 20_000);
 });

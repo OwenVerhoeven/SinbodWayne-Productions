@@ -402,7 +402,7 @@ async function assertIsolatedSeedTarget(persistencePath: string): Promise<void> 
       (SELECT COUNT(*) FROM user_identities) AS users,
       (SELECT COUNT(*) FROM projects) AS projects,
       (SELECT COUNT(*) FROM workspaces WHERE id <> '${fixtureId("workspace")}') AS unexpectedWorkspaces,
-      (SELECT COUNT(*) FROM user_identities WHERE id NOT IN ('${fixtureId("owner")}', '${fixtureId("producer")}')) AS unexpectedUsers,
+      (SELECT COUNT(*) FROM user_identities WHERE id NOT IN ('${fixtureId("owner")}', '${fixtureId("producer")}', '${fixtureId("viewer")}')) AS unexpectedUsers,
       (SELECT COUNT(*) FROM projects WHERE id <> '${fixtureId("project")}') AS unexpectedProjects;`,
     { persistTo: persistencePath },
   );
@@ -410,7 +410,7 @@ async function assertIsolatedSeedTarget(persistencePath: string): Promise<void> 
   if (
     result === undefined ||
     Number(result.workspaces) > 1 ||
-    Number(result.users) > 2 ||
+    Number(result.users) > 3 ||
     Number(result.projects) > 1 ||
     Number(result.unexpectedWorkspaces) !== 0 ||
     Number(result.unexpectedUsers) !== 0 ||
@@ -477,7 +477,7 @@ async function main(): Promise<void> {
   const result = rows[0];
   if (
     result === undefined ||
-    Number(result.users) !== 2 ||
+    Number(result.users) !== 3 ||
     Number(result.projects) !== 1 ||
     Number(result.scenes) !== 6 ||
     Number(result.readinessIssues) !== 2 ||

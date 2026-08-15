@@ -29,6 +29,12 @@ const createSchema = z
 const patchSchema = createSchema
   .partial()
   .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
+const rankSchema = z
+  .object({
+    afterId: z.string().min(1).max(64).nullable().optional(),
+    beforeId: z.string().min(1).max(64).nullable().optional(),
+  })
+  .strict();
 const listSchema = z.object({
   q: z.string().max(240).catch(""),
   state: z.enum(["active", "archived", "all"]).catch("active"),
@@ -38,6 +44,7 @@ const listSchema = z.object({
     .regex(/^\d+:[0-9a-f-]+$/u)
     .optional(),
   limit: z.coerce.number().int().min(1).max(100).catch(50),
+  order: z.enum(["updated", "rank"]).catch("updated"),
 });
 
 interface RecordRow {
@@ -52,6 +59,9 @@ interface RecordRow {
   readonly updated_at: number;
   readonly version: number;
   readonly archived_at: number | null;
+  readonly type?: string | null;
+  readonly source?: string | null;
+  readonly document_type?: string | null;
 }
 
 export const recordRoutes = new Hono<AppEnv>();
@@ -72,17 +82,21 @@ recordRoutes.get("/:recordType", async (context) => {
       : query.state === "archived"
         ? "AND r.archived_at IS NOT NULL"
         : "";
+  const cursorClause =
+    query.order === "updated"
+      ? "AND (?5 IS NULL OR (r.updated_at < CAST(substr(?5, 1, instr(?5, ':') - 1) AS INTEGER) OR (r.updated_at = CAST(substr(?5, 1, instr(?5, ':') - 1) AS INTEGER) AND r.id < substr(?5, instr(?5, ':') + 1))))"
+      : "AND ?5 IS NULL";
+  const orderClause = query.order === "rank" ? "r.sort_rank, r.id" : "r.updated_at DESC, r.id DESC";
   const result = await context.env.DB.prepare(
-    `SELECT r.id, r.title, r.status, r.summary, u.display_name AS owner_display_name,
-            r.sort_rank, r.details_json, r.created_at, r.updated_at, r.version, r.archived_at
+    `SELECT r.*, u.display_name AS owner_display_name
        FROM ${definition.table} r
        LEFT JOIN user_identities u ON u.id = r.owner_user_id AND u.workspace_id = r.workspace_id
       WHERE r.workspace_id = ?1 AND r.project_id = ?2
         AND (?3 = '' OR r.title LIKE ?4 ESCAPE '\\' OR COALESCE(r.summary, '') LIKE ?4 ESCAPE '\\')
         ${archiveClause}
-        AND (?5 IS NULL OR (r.updated_at < CAST(substr(?5, 1, instr(?5, ':') - 1) AS INTEGER) OR (r.updated_at = CAST(substr(?5, 1, instr(?5, ':') - 1) AS INTEGER) AND r.id < substr(?5, instr(?5, ':') + 1))))
+        ${cursorClause}
         AND (?7 IS NULL OR r.status = ?7)
-      ORDER BY r.updated_at DESC, r.id DESC
+      ORDER BY ${orderClause}
       LIMIT ?6`,
   )
     .bind(
@@ -90,7 +104,7 @@ recordRoutes.get("/:recordType", async (context) => {
       projectId,
       query.q,
       search,
-      query.cursor ?? null,
+      query.order === "updated" ? (query.cursor ?? null) : null,
       query.limit + 1,
       query.status ?? null,
     )
@@ -101,7 +115,8 @@ recordRoutes.get("/:recordType", async (context) => {
   const last = items.at(-1);
   return ok(context, {
     items,
-    nextCursor: hasMore && last ? `${last.updatedAt}:${last.id}` : null,
+    nextCursor:
+      query.order === "updated" && hasMore && last ? `${last.updatedAt}:${last.id}` : null,
     total: await recordCount(
       context.env.DB,
       definition.table,
@@ -129,7 +144,7 @@ recordRoutes.get("/:recordType/export.csv", async (context) => {
         ? "AND r.archived_at IS NOT NULL"
         : "";
   const result = await context.env.DB.prepare(
-    `SELECT r.id, r.title, r.status, r.summary, u.display_name AS owner_display_name, r.sort_rank, r.details_json, r.created_at, r.updated_at, r.version, r.archived_at
+    `SELECT r.*, u.display_name AS owner_display_name
        FROM ${definition.table} r LEFT JOIN user_identities u ON u.id = r.owner_user_id
       WHERE r.workspace_id = ?1 AND r.project_id = ?2 ${archiveClause} AND (?3 IS NULL OR r.status = ?3)
       ORDER BY r.sort_rank, r.id LIMIT 10000`,
@@ -195,23 +210,62 @@ recordRoutes.post("/:recordType", async (context) => {
   const id = createUuidV7();
   const now = Date.now();
   const rank = rankBetween(last?.sort_rank, undefined);
+  const recordInsert =
+    definition.objectType === "idea"
+      ? context.env.DB.prepare(
+          `INSERT INTO ${definition.table}
+            (id, workspace_id, project_id, title, type, source, status, summary, owner_user_id, sort_rank, details_json, created_by, created_at, updated_at, version, archived_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?9, ?12, ?12, 1, NULL)`,
+        ).bind(
+          id,
+          actor.workspaceId,
+          projectId,
+          input.title,
+          detailString(input.details, "type"),
+          detailString(input.details, "source"),
+          input.status,
+          input.summary || null,
+          actor.userId,
+          rank,
+          details,
+          now,
+        )
+      : definition.objectType === "development_document"
+        ? context.env.DB.prepare(
+            `INSERT INTO ${definition.table}
+              (id, workspace_id, project_id, document_type, title, status, summary, owner_user_id, sort_rank, details_json, created_by, created_at, updated_at, version, archived_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?8, ?11, ?11, 1, NULL)`,
+          ).bind(
+            id,
+            actor.workspaceId,
+            projectId,
+            detailString(input.details, "documentType") ?? "treatment",
+            input.title,
+            input.status,
+            input.summary || null,
+            actor.userId,
+            rank,
+            details,
+            now,
+          )
+        : context.env.DB.prepare(
+            `INSERT INTO ${definition.table}
+              (id, workspace_id, project_id, title, status, summary, owner_user_id, sort_rank, details_json, created_by, created_at, updated_at, version, archived_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?7, ?10, ?10, 1, NULL)`,
+          ).bind(
+            id,
+            actor.workspaceId,
+            projectId,
+            input.title,
+            input.status,
+            input.summary || null,
+            actor.userId,
+            rank,
+            details,
+            now,
+          );
   await context.env.DB.batch([
-    context.env.DB.prepare(
-      `INSERT INTO ${definition.table}
-        (id, workspace_id, project_id, title, status, summary, owner_user_id, sort_rank, details_json, created_by, created_at, updated_at, version, archived_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?7, ?10, ?10, 1, NULL)`,
-    ).bind(
-      id,
-      actor.workspaceId,
-      projectId,
-      input.title,
-      input.status,
-      input.summary || null,
-      actor.userId,
-      rank,
-      details,
-      now,
-    ),
+    recordInsert,
     context.env.DB.prepare(
       "INSERT INTO object_registry (id, workspace_id, project_id, object_type, domain_table, domain_id, title, version, archived_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, NULL, ?8, ?8)",
     ).bind(
@@ -253,6 +307,117 @@ recordRoutes.post("/:recordType", async (context) => {
 });
 
 recordRoutes.use("/:recordType/:recordId", requireJson);
+recordRoutes.use("/:recordType/:recordId/rank", requireJson);
+recordRoutes.patch("/:recordType/:recordId/rank", async (context) => {
+  const actor = context.get("actor");
+  const projectId = requiredParam(context.req.param("projectId"), "projectId");
+  const recordId = requiredParam(context.req.param("recordId"), "recordId");
+  const definition = requireDefinition(
+    requiredParam(context.req.param("recordType"), "recordType"),
+  );
+  await assertProjectAccess(context.env.DB, actor, projectId, "edit");
+  const expected = parseIfMatch(context.req.header("If-Match"));
+  const input = rankSchema.parse(await context.req.json());
+  if (input.afterId === recordId || input.beforeId === recordId)
+    throw new HttpError(
+      422,
+      "invalid_rank_reference",
+      "A record cannot be ranked relative to itself.",
+    );
+  await requireRecord(
+    context.env.DB,
+    definition.table,
+    definition.objectType,
+    actor.workspaceId,
+    projectId,
+    recordId,
+  );
+  const [after, before] = await Promise.all([
+    input.afterId
+      ? requireRecord(
+          context.env.DB,
+          definition.table,
+          definition.objectType,
+          actor.workspaceId,
+          projectId,
+          input.afterId,
+        )
+      : undefined,
+    input.beforeId
+      ? requireRecord(
+          context.env.DB,
+          definition.table,
+          definition.objectType,
+          actor.workspaceId,
+          projectId,
+          input.beforeId,
+        )
+      : undefined,
+  ]);
+  if (after && before && after.sort_rank >= before.sort_rank)
+    throw new HttpError(422, "invalid_rank_window", "The requested ranking window is invalid.");
+  const rank = rankBetween(after?.sort_rank, before?.sort_rank);
+  const guard = versionGuard(
+    context.env.DB,
+    definition.table,
+    recordId,
+    actor.workspaceId,
+    projectId,
+    expected,
+  );
+  const now = Date.now();
+  try {
+    await context.env.DB.batch([
+      guard.insert,
+      context.env.DB.prepare(
+        `UPDATE ${definition.table} SET sort_rank = ?1, updated_at = ?2, version = version + 1
+          WHERE id = ?3 AND workspace_id = ?4 AND project_id = ?5`,
+      ).bind(rank, now, recordId, actor.workspaceId, projectId),
+      context.env.DB.prepare(
+        "UPDATE object_registry SET version = version + 1, updated_at = ?1 WHERE workspace_id = ?2 AND project_id = ?3 AND domain_table = ?4 AND domain_id = ?5",
+      ).bind(now, actor.workspaceId, projectId, definition.table, recordId),
+      auditStatement(context.env.DB, {
+        workspaceId: actor.workspaceId,
+        projectId,
+        actor,
+        action: `${definition.objectType}.ranked`,
+        objectType: definition.objectType,
+        objectId: recordId,
+        requestId: context.get("requestId"),
+        occurredAt: now,
+        details: { afterId: input.afterId ?? null, beforeId: input.beforeId ?? null },
+      }),
+      guard.remove,
+    ]);
+  } catch (error) {
+    if (isConstraintError(error))
+      throw await recordConflict(
+        context.env.DB,
+        definition.table,
+        definition.objectType,
+        actor.workspaceId,
+        projectId,
+        recordId,
+        expected,
+      );
+    throw error;
+  }
+  return ok(
+    context,
+    recordView(
+      await requireRecord(
+        context.env.DB,
+        definition.table,
+        definition.objectType,
+        actor.workspaceId,
+        projectId,
+        recordId,
+      ),
+      definition.objectType,
+    ),
+  );
+});
+
 recordRoutes.patch("/:recordType/:recordId", async (context) => {
   const actor = context.get("actor");
   const projectId = requiredParam(context.req.param("projectId"), "projectId");
@@ -281,23 +446,61 @@ recordRoutes.patch("/:recordType/:recordId", async (context) => {
   );
   const now = Date.now();
   const details = input.details ? boundedDetails(input.details) : current.details_json;
+  const detailValues = parseDetails(details);
+  const recordUpdate =
+    definition.objectType === "idea"
+      ? context.env.DB.prepare(
+          `UPDATE ${definition.table}
+              SET title = ?1, status = ?2, summary = ?3, details_json = ?4, type = ?5, source = ?6,
+                  updated_at = ?7, version = version + 1
+            WHERE id = ?8 AND workspace_id = ?9 AND project_id = ?10`,
+        ).bind(
+          input.title ?? current.title,
+          input.status ?? current.status,
+          input.summary === undefined ? current.summary : input.summary || null,
+          details,
+          detailString(detailValues, "type") ?? current.type ?? null,
+          detailString(detailValues, "source") ?? current.source ?? null,
+          now,
+          recordId,
+          actor.workspaceId,
+          projectId,
+        )
+      : definition.objectType === "development_document"
+        ? context.env.DB.prepare(
+            `UPDATE ${definition.table}
+                SET title = ?1, status = ?2, summary = ?3, details_json = ?4, document_type = ?5,
+                    updated_at = ?6, version = version + 1
+              WHERE id = ?7 AND workspace_id = ?8 AND project_id = ?9`,
+          ).bind(
+            input.title ?? current.title,
+            input.status ?? current.status,
+            input.summary === undefined ? current.summary : input.summary || null,
+            details,
+            detailString(detailValues, "documentType") ?? current.document_type ?? "treatment",
+            now,
+            recordId,
+            actor.workspaceId,
+            projectId,
+          )
+        : context.env.DB.prepare(
+            `UPDATE ${definition.table}
+                SET title = ?1, status = ?2, summary = ?3, details_json = ?4, updated_at = ?5, version = version + 1
+              WHERE id = ?6 AND workspace_id = ?7 AND project_id = ?8`,
+          ).bind(
+            input.title ?? current.title,
+            input.status ?? current.status,
+            input.summary === undefined ? current.summary : input.summary || null,
+            details,
+            now,
+            recordId,
+            actor.workspaceId,
+            projectId,
+          );
   try {
     await context.env.DB.batch([
       guard.insert,
-      context.env.DB.prepare(
-        `UPDATE ${definition.table}
-            SET title = ?1, status = ?2, summary = ?3, details_json = ?4, updated_at = ?5, version = version + 1
-          WHERE id = ?6 AND workspace_id = ?7 AND project_id = ?8`,
-      ).bind(
-        input.title ?? current.title,
-        input.status ?? current.status,
-        input.summary === undefined ? current.summary : input.summary || null,
-        details,
-        now,
-        recordId,
-        actor.workspaceId,
-        projectId,
-      ),
+      recordUpdate,
       auditStatement(context.env.DB, {
         workspaceId: actor.workspaceId,
         projectId,
@@ -420,7 +623,7 @@ async function requireRecord(
 ): Promise<RecordRow> {
   const row = await db
     .prepare(
-      `SELECT r.id, r.title, r.status, r.summary, u.display_name AS owner_display_name, r.sort_rank, r.details_json, r.created_at, r.updated_at, r.version, r.archived_at FROM ${table} r LEFT JOIN user_identities u ON u.id = r.owner_user_id WHERE r.id = ?1 AND r.workspace_id = ?2 AND r.project_id = ?3 LIMIT 1`,
+      `SELECT r.*, u.display_name AS owner_display_name FROM ${table} r LEFT JOIN user_identities u ON u.id = r.owner_user_id WHERE r.id = ?1 AND r.workspace_id = ?2 AND r.project_id = ?3 LIMIT 1`,
     )
     .bind(recordId, workspaceId, projectId)
     .first<RecordRow>();
@@ -434,6 +637,21 @@ async function requireRecord(
 }
 
 function recordView(row: RecordRow, recordType: string) {
+  const rawDetails = parseDetails(row.details_json);
+  const details =
+    recordType === "idea"
+      ? {
+          ...rawDetails,
+          type: detailString(rawDetails, "type") ?? row.type ?? "",
+          source: detailString(rawDetails, "source") ?? row.source ?? "",
+        }
+      : recordType === "development_document"
+        ? {
+            ...rawDetails,
+            documentType:
+              detailString(rawDetails, "documentType") ?? row.document_type ?? "treatment",
+          }
+        : rawDetails;
   return {
     id: row.id,
     recordType,
@@ -442,12 +660,17 @@ function recordView(row: RecordRow, recordType: string) {
     summary: row.summary,
     ownerDisplayName: row.owner_display_name,
     sortRank: row.sort_rank,
-    details: parseDetails(row.details_json),
+    details,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: row.version,
     archivedAt: row.archived_at,
   };
+}
+
+function detailString(details: Record<string, unknown> | undefined, key: string): string | null {
+  const value = details?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function parseDetails(value: string): Record<string, unknown> {
@@ -463,7 +686,7 @@ function parseDetails(value: string): Record<string, unknown> {
 
 function boundedDetails(value: Record<string, unknown>): string {
   const encoded = JSON.stringify(value);
-  if (new TextEncoder().encode(encoded).byteLength > 32_768)
+  if (new TextEncoder().encode(encoded).byteLength > 262_144)
     throw new HttpError(422, "details_too_large", "Structured details exceed the allowed size.");
   return encoded;
 }

@@ -6,7 +6,7 @@ import { LoginPage } from "./auth/LoginPage";
 import { ProjectOverviewPage } from "./overview/ProjectOverviewPage";
 import { ProjectListPage } from "./projects/ProjectListPage";
 import { ModuleRegistryPage } from "./records/ModuleRegistryPage";
-import { ScreenplayPage } from "./writing/ScreenplayPage";
+import { ProfessionalScreenplayPage } from "./writing/ProfessionalScreenplayPage";
 import { ReadinessPage } from "./readiness/ReadinessPage";
 import { ProjectSettingsPage } from "./settings/ProjectSettingsPage";
 import { PublicSharePage } from "./shares/PublicSharePage";
@@ -20,6 +20,8 @@ import { ShootDaysPage } from "./operations/ShootDaysPage";
 import { PlanningControlsPage } from "./planning/PlanningControlsPage";
 import { PlanningPrintPage } from "./planning/PlanningPrintPage";
 import { ExportsArchivePage } from "./archive/ExportsArchivePage";
+import { IdeaBoxPage } from "./creative/IdeaBoxPage";
+import { StoryPage } from "./creative/StoryPage";
 
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
@@ -36,7 +38,9 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate replace to="/projects" /> },
       { path: "projects", element: <ProjectListPage /> },
       { path: "projects/:projectId/overview", element: <ProjectOverviewPage /> },
-      { path: "projects/:projectId/screenplay", element: <ScreenplayPage /> },
+      { path: "projects/:projectId/ideas", element: <IdeaBoxPage /> },
+      { path: "projects/:projectId/story", element: <StoryPage /> },
+      { path: "projects/:projectId/screenplay", element: <ProfessionalScreenplayPage /> },
       { path: "projects/:projectId/readiness", element: <ReadinessPage /> },
       { path: "projects/:projectId/settings", element: <ProjectSettingsPage /> },
       { path: "projects/:projectId/files", element: <FilesPage /> },

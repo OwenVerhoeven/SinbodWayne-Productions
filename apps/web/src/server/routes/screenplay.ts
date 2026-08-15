@@ -49,6 +49,7 @@ const createBlockSchema = z
   .object({
     sceneId: z.string().min(1).max(64),
     type: z.enum(screenplayBlockTypes).default("action"),
+    afterBlockId: z.string().min(1).max(64).optional(),
   })
   .strict();
 const revisionSchema = z
@@ -315,6 +316,22 @@ screenplayRoutes.post("/blocks", async (context) => {
   if (lastSceneBlockIndex < 0)
     throw new HttpError(404, "scene_not_found", "The selected scene is not in this draft.");
 
+  if (input.afterBlockId) {
+    const requestedIndex = blocks.findIndex((block) => block.id === input.afterBlockId);
+    const requested = blocks[requestedIndex];
+    if (
+      requestedIndex < 0 ||
+      !requested ||
+      parseAttributes(requested.attributes_json).sceneId !== input.sceneId
+    )
+      throw new HttpError(
+        422,
+        "invalid_block_position",
+        "The insertion point is not part of the selected scene.",
+      );
+    lastSceneBlockIndex = requestedIndex;
+  }
+
   const previousRank = blocks[lastSceneBlockIndex]?.sort_rank;
   const nextRank = blocks[lastSceneBlockIndex + 1]?.sort_rank;
   const blockId = createUuidV7();
@@ -355,6 +372,53 @@ screenplayRoutes.post("/blocks", async (context) => {
     }),
   ]);
   return ok(context, { created: true as const, blockId }, 201);
+});
+
+screenplayRoutes.delete("/blocks/:blockId", async (context) => {
+  const actor = context.get("actor");
+  const projectId = requiredProjectId(context.req.param("projectId"));
+  const blockId = context.req.param("blockId");
+  if (!blockId) throw new HttpError(404, "block_not_found", "The script block was not found.");
+  await assertProjectAccess(context.env.DB, actor, projectId, "edit");
+  const screenplay = await requireScreenplay(context.env.DB, actor.workspaceId, projectId);
+  const block = await context.env.DB.prepare(
+    `SELECT block_type FROM script_draft_blocks
+      WHERE id = ?1 AND workspace_id = ?2 AND project_id = ?3 AND screenplay_id = ?4
+        AND draft_id = ?5 AND archived_at IS NULL LIMIT 1`,
+  )
+    .bind(blockId, actor.workspaceId, projectId, screenplay.id, screenplay.current_draft_id)
+    .first<{ block_type: string }>();
+  if (!block) throw new HttpError(404, "block_not_found", "The script block was not found.");
+  if (uiBlockType(block.block_type) === "scene_heading")
+    throw new HttpError(
+      422,
+      "scene_heading_required",
+      "Scene headings define stable scene identity and cannot be removed as ordinary blocks.",
+    );
+  const now = Date.now();
+  await context.env.DB.batch([
+    context.env.DB.prepare(
+      "UPDATE script_draft_blocks SET archived_at = ?1, updated_at = ?1 WHERE id = ?2 AND workspace_id = ?3 AND project_id = ?4",
+    ).bind(now, blockId, actor.workspaceId, projectId),
+    context.env.DB.prepare(
+      "UPDATE script_drafts SET version = version + 1, updated_at = ?1 WHERE id = ?2",
+    ).bind(now, screenplay.current_draft_id),
+    context.env.DB.prepare(
+      "UPDATE screenplays SET version = version + 1, updated_at = ?1 WHERE id = ?2",
+    ).bind(now, screenplay.id),
+    auditStatement(context.env.DB, {
+      workspaceId: actor.workspaceId,
+      projectId,
+      actor,
+      action: "screenplay.block_archived",
+      objectType: "screenplay",
+      objectId: screenplay.id,
+      requestId: context.get("requestId"),
+      occurredAt: now,
+      details: { blockId },
+    }),
+  ]);
+  return ok(context, { deleted: true as const });
 });
 
 screenplayRoutes.post("/import", async (context) => {

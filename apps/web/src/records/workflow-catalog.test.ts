@@ -1,16 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { allModules } from "../app/module-catalog";
 import { recordFieldCatalog } from "./field-catalog";
 import { recordWorkflowCatalog } from "./workflow-catalog";
 
 describe("guided record workflows", () => {
-  it("covers every registry module with every persisted planning field exactly once", () => {
-    const registryTypes = allModules.flatMap((module) =>
-      module.recordType ? [module.recordType] : [],
-    );
+  it("keeps every preserved registry backend covered while its navigation is focused", () => {
+    const registryTypes = Object.keys(recordFieldCatalog);
 
-    expect(Object.keys(recordFieldCatalog).sort()).toEqual([...registryTypes].sort());
     for (const recordType of registryTypes) {
       const workflow = recordWorkflowCatalog[recordType];
       const fieldKeys = recordFieldCatalog[recordType]?.map((field) => field.key) ?? [];

@@ -28,7 +28,7 @@ export default defineConfig({
     { name: "phone", use: { ...devices["iPhone 14"], browserName: "chromium" } },
   ],
   webServer: {
-    command: "npm run seed:local && npm run dev",
+    command: "npm run seed:test && npm run dev:e2e",
     cwd: ".",
     url: "http://127.0.0.1:5173",
     reuseExistingServer: !process.env.CI,

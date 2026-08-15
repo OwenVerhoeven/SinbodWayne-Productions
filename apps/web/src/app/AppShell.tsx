@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
-import { IconButton, Status, Wordmark } from "@swp/ui";
+import { IconButton, Status, SurfaceBoundary, Wordmark } from "@swp/ui";
 
 import { apiRequest } from "../api/client";
 import { useAuth } from "../auth/auth-context";
@@ -228,8 +228,35 @@ export function AppShell() {
             </span>
           </div>
         ) : null}
-        <Outlet context={{ activeProject }} />
+        {projectId && projects.isLoading ? (
+          <SurfaceBoundary state="loading" title="Loading project" />
+        ) : projectId && projects.isError ? (
+          <SurfaceBoundary state="error" title="Project unavailable" />
+        ) : (
+          <Outlet context={{ activeProject }} />
+        )}
       </main>
+      {activeProject ? (
+        <nav aria-label="Project tools" className="project-tool-dock">
+          {navigationGroups
+            .flatMap((group) => group.modules)
+            .map((module) => {
+              const Icon = module.icon;
+              return (
+                <NavLink
+                  className={({ isActive }) =>
+                    `project-tool-dock__item${isActive ? " project-tool-dock__item--active" : ""}`
+                  }
+                  key={module.key}
+                  to={`/projects/${activeProject.id}/${module.key}`}
+                >
+                  <Icon aria-hidden />
+                  <span>{module.title}</span>
+                </NavLink>
+              );
+            })}
+        </nav>
+      ) : null}
       <CommandPalette
         activeProject={activeProject}
         onClose={() => setCommandOpen(false)}

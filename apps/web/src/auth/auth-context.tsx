@@ -86,6 +86,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const signOut = useCallback(async () => {
     await apiRequest("/api/v1/auth/logout", z.object({ revoked: z.literal(true) }), {
       method: "POST",
+      body: jsonBody({}),
     });
     setCsrfToken(undefined);
     setAccount(undefined);
